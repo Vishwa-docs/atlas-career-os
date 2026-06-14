@@ -17,9 +17,7 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 
 class MatchResult(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "match_results"
-    __table_args__ = (
-        UniqueConstraint("candidate_id", "job_id", name="uq_match_results_cand_job"),
-    )
+    __table_args__ = (UniqueConstraint("candidate_id", "job_id", name="uq_match_results_cand_job"),)
 
     candidate_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("candidate_profiles.id", ondelete="CASCADE"), index=True, nullable=False

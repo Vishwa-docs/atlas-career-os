@@ -24,9 +24,7 @@ APPLICATION_STATUSES = (
 
 class Application(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "applications"
-    __table_args__ = (
-        UniqueConstraint("candidate_id", "job_id", name="uq_applications_cand_job"),
-    )
+    __table_args__ = (UniqueConstraint("candidate_id", "job_id", name="uq_applications_cand_job"),)
 
     candidate_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("candidate_profiles.id", ondelete="CASCADE"), index=True, nullable=False

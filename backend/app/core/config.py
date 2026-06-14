@@ -8,10 +8,10 @@ constructed once per process.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -57,7 +57,12 @@ class Settings(BaseSettings):
     use_mock_llm: bool = True
 
     # --- CORS ---
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # NoDecode: let our validator split a comma-separated string itself, instead
+    # of pydantic-settings trying to JSON-decode the env value.
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
 
     # --- Rate limiting ---
     rate_limit_default: str = "200/minute"

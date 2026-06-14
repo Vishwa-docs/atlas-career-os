@@ -1,0 +1,56 @@
+# Render blueprint for the Atlas backend (API + ARQ worker + Redis).
+# The Postgres lives on Neon (set DATABASE_URL). Frontend is on Vercel.
+services:
+  - type: web
+    name: atlas-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false # set to your Neon connection string (postgresql+asyncpg://...)
+      - key: SECRET_KEY
+        generateValue: true
+      - key: USE_MOCK_LLM
+        value: "false"
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        value: gpt-4o
+      - key: AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+        value: text-embedding-3-large
+      - key: AZURE_OPENAI_API_VERSION
+        value: "2024-10-21"
+      - key: REDIS_URL
+        fromService:
+          name: atlas-redis
+          type: redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false # e.g. https://atlas.vercel.app
+    preDeployCommand: "python -m app.scripts.init_db"
+
+  - type: worker
+    name: atlas-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: arq app.workers.arq_settings.WorkerSettings
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: atlas-redis
+          type: redis
+          property: connectionString
+
+  - type: redis
+    name: atlas-redis
+    ipAllowList: []
+    plan: free

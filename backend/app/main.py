@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        default_response_class=ORJSONResponse,
+        default_response_class=JSONResponse,
         lifespan=lifespan,
         docs_url="/docs",
         openapi_url="/openapi.json",
@@ -97,8 +97,8 @@ def create_app() -> FastAPI:
     return app
 
 
-def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> ORJSONResponse:
-    return ORJSONResponse(
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
         status_code=429,
         content={"error": {"code": "rate_limited", "message": "Too many requests."}},
     )

@@ -50,9 +50,7 @@ class MockLLMClient:
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> ChatResult:
-        last_user = next(
-            (m.content for m in reversed(messages) if m.role == "user"), ""
-        )
+        last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         reply = (
             "Here's how I'd think about that. Based on what you've shared, a few "
             "realistic options stand out — each with trade-offs. "

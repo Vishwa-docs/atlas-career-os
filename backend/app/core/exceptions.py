@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 
 
 class AppError(Exception):
@@ -69,20 +69,20 @@ class LLMError(AppError):
 
 def _problem(
     status_code: int, code: str, message: str, details: Any | None = None
-) -> ORJSONResponse:
+) -> JSONResponse:
     body: dict[str, Any] = {"error": {"code": code, "message": message}}
     if details is not None:
         body["error"]["details"] = details
-    return ORJSONResponse(status_code=status_code, content=body)
+    return JSONResponse(status_code=status_code, content=body)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
-    async def _app_error_handler(_: Request, exc: AppError) -> ORJSONResponse:
+    async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
         return _problem(exc.status_code, exc.code, exc.message, exc.details)
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_handler(_: Request, exc: RequestValidationError) -> ORJSONResponse:
+    async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         return _problem(
             422,
             "validation_error",
