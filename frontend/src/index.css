@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Atlas design tokens — "Midnight & Aurora".
+  Deep indigo base (trust, navigation, the night sky you steer by) with an
+  aurora-violet brand accent. Semantic tokens follow the shadcn/ui convention so
+  every primitive themes consistently in light and dark.
+*/
+@layer base {
+  :root {
+    --background: 240 20% 99%;
+    --foreground: 240 32% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 32% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 32% 12%;
+
+    --primary: 245 58% 51%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 16% 95%;
+    --secondary-foreground: 240 30% 20%;
+
+    --muted: 240 16% 96%;
+    --muted-foreground: 240 10% 44%;
+
+    --accent: 268 70% 96%;
+    --accent-foreground: 268 60% 30%;
+
+    --brand: 265 84% 60%;
+    --brand-foreground: 0 0% 100%;
+
+    --success: 152 56% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 240 32% 12%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 16% 90%;
+    --input: 240 16% 90%;
+    --ring: 245 58% 51%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 240 30% 7%;
+    --foreground: 240 20% 96%;
+
+    --card: 240 28% 10%;
+    --card-foreground: 240 20% 96%;
+    --popover: 240 28% 10%;
+    --popover-foreground: 240 20% 96%;
+
+    --primary: 252 90% 70%;
+    --primary-foreground: 240 40% 8%;
+
+    --secondary: 240 20% 16%;
+    --secondary-foreground: 240 20% 92%;
+
+    --muted: 240 20% 16%;
+    --muted-foreground: 240 12% 64%;
+
+    --accent: 268 40% 22%;
+    --accent-foreground: 268 70% 88%;
+
+    --brand: 265 84% 68%;
+    --brand-foreground: 240 40% 8%;
+
+    --success: 152 50% 50%;
+    --success-foreground: 240 40% 8%;
+    --warning: 38 92% 58%;
+    --warning-foreground: 240 40% 8%;
+    --destructive: 0 72% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 18% 20%;
+    --input: 240 18% 22%;
+    --ring: 252 90% 70%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer utilities {
+  .aurora-text {
+    @apply bg-gradient-to-r from-primary via-brand to-primary bg-clip-text text-transparent;
+  }
+  .glass {
+    @apply bg-card/70 backdrop-blur-xl;
+  }
+}
