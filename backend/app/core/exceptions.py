@@ -47,7 +47,7 @@ class ConflictError(AppError):
 
 
 class ValidationError(AppError):
-    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    status_code = 422
     code = "validation_error"
 
 
@@ -67,7 +67,9 @@ class LLMError(AppError):
     code = "llm_error"
 
 
-def _problem(status_code: int, code: str, message: str, details: Any | None = None) -> ORJSONResponse:
+def _problem(
+    status_code: int, code: str, message: str, details: Any | None = None
+) -> ORJSONResponse:
     body: dict[str, Any] = {"error": {"code": code, "message": message}}
     if details is not None:
         body["error"]["details"] = details
@@ -82,7 +84,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(_: Request, exc: RequestValidationError) -> ORJSONResponse:
         return _problem(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            422,
             "validation_error",
             "Request validation failed.",
             exc.errors(),
