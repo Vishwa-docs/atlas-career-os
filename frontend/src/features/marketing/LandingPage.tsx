@@ -65,6 +65,7 @@ export default function LandingPage() {
             <a href="#thesis" className="hover:text-foreground">Why Atlas</a>
             <a href="#rooms" className="hover:text-foreground">Three rooms</a>
             <a href="#trust" className="hover:text-foreground">Trust</a>
+            <a href="/deck.html" target="_blank" rel="noreferrer" className="hover:text-foreground">Pitch deck ↗</a>
           </nav>
           <div className="flex items-center gap-2">
             <Button variant="ghost" asChild>
@@ -107,6 +108,11 @@ export default function LandingPage() {
               </Button>
               <Button variant="outline" size="lg" asChild>
                 <Link to="/login">Explore the demo</Link>
+              </Button>
+              <Button variant="ghost" size="lg" asChild>
+                <a href="/deck.html" target="_blank" rel="noreferrer">
+                  View the pitch deck <ArrowRight className="h-4 w-4" />
+                </a>
               </Button>
             </div>
             <p className="mt-4 text-xs text-muted-foreground">
