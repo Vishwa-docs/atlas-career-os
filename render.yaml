@@ -21,19 +21,24 @@ services:
       - key: AZURE_OPENAI_API_KEY
         sync: false
       - key: AZURE_OPENAI_DEPLOYMENT
-        value: gpt-4o
+        value: gpt-4o-2
       - key: AZURE_OPENAI_EMBEDDING_DEPLOYMENT
         value: text-embedding-3-large
       - key: AZURE_OPENAI_API_VERSION
-        value: "2024-10-21"
+        value: "2024-12-01-preview"
+      # Embeddings stay on the deterministic embedder (matches the seeded corpus;
+      # the demo Azure resource has no embeddings deployment).
+      - key: USE_AZURE_EMBEDDINGS
+        value: "false"
       - key: REDIS_URL
         fromService:
           name: atlas-redis
           type: redis
           property: connectionString
       - key: CORS_ORIGINS
-        sync: false # e.g. https://atlas.vercel.app
-    preDeployCommand: "python -m app.scripts.init_db"
+        sync: false # set to your Vercel URL, e.g. https://frontend-bay-two-7untyz4smg.vercel.app
+    # Create schema + seed demo data on first deploy (seed is idempotent).
+    preDeployCommand: "python -m app.scripts.init_db && python -m app.scripts.seed --if-empty"
 
   - type: worker
     name: atlas-worker
@@ -44,6 +49,9 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      # Worker only does deterministic re-embedding — no Azure key needed.
+      - key: USE_MOCK_LLM
+        value: "true"
       - key: REDIS_URL
         fromService:
           name: atlas-redis
