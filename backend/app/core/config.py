@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 10
     db_max_overflow: int = 20
+    # Managed Postgres (Neon, Azure, etc.) requires TLS; asyncpg needs it set
+    # explicitly. Leave false for local Docker Postgres.
+    db_require_ssl: bool = False
 
     # --- Redis (ARQ + caching + pub/sub) ---
     redis_url: str = "redis://localhost:6379/0"

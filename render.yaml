@@ -12,6 +12,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false # set to your Neon connection string (postgresql+asyncpg://...)
+      - key: DB_REQUIRE_SSL
+        value: "true"
       - key: SECRET_KEY
         generateValue: true
       - key: USE_MOCK_LLM
@@ -49,6 +51,8 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: DB_REQUIRE_SSL
+        value: "true"
       # Worker only does deterministic re-embedding — no Azure key needed.
       - key: USE_MOCK_LLM
         value: "true"
