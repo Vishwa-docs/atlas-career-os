@@ -10,8 +10,6 @@ RAG layer / guardrails; builders just compose.
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.domains.ai.guardrails import SYSTEM_PREAMBLE, wrap_untrusted
 from app.domains.ai.llm.client import ChatMessage
 
@@ -81,142 +79,6 @@ def build_coach_structured_messages(
         )
     )
     return msgs
-
-
-# --------------------------------------------------------------------------- #
-# Trajectory Atlas
-# --------------------------------------------------------------------------- #
-def build_atlas_messages(
-    *,
-    candidate_context: str,
-    current_occupation: str,
-    transitions: list[dict[str, Any]],
-    horizon_years: int,
-) -> list[ChatMessage]:
-    facts = _render_transitions(transitions)
-    return [
-        _sys(),
-        ChatMessage(
-            role="user",
-            content=(
-                "Map 2–4 realistic career routes for this person over the next "
-                f"{horizon_years} year(s). Ground each route in the OBSERVED "
-                "TRANSITIONS below — prefer moves that actually happen in the "
-                "market. For each route give a salary RANGE, a time-to-reach range "
-                "in months, a feasibility 0–1, the demand_trend, the concrete "
-                "skill_gaps (have vs need), and the trade_offs.\n\n"
-                f"CURRENT OCCUPATION: {current_occupation}\n"
-                f"OBSERVED TRANSITIONS:\n{facts}\n\n"
-                f"{candidate_context}\n\n" + _HONESTY
-            ),
-        ),
-    ]
-
-
-# --------------------------------------------------------------------------- #
-# Fair Pay
-# --------------------------------------------------------------------------- #
-def build_fair_pay_messages(
-    *,
-    role: str,
-    location: str,
-    median_salary_myr: int | None,
-    current_pay: int | None,
-    candidate_context: str,
-) -> list[ChatMessage]:
-    anchor = (
-        f"OpenDOSM median monthly salary anchor: MYR {median_salary_myr}. "
-        f"Starting heuristic band — p25≈{int(median_salary_myr * 0.8)}, "
-        f"p50≈{median_salary_myr}, p75≈{int(median_salary_myr * 1.25)} "
-        "(you may adjust within reason given the evidence)."
-        if median_salary_myr
-        else "No salary anchor available — return a LOW-confidence estimate."
-    )
-    pay_line = (
-        f"The user's current pay is MYR {current_pay}/month."
-        if current_pay
-        else "The user did not share their current pay."
-    )
-    return [
-        _sys(),
-        ChatMessage(
-            role="user",
-            content=(
-                f"Benchmark fair pay for a {role} in {location}. Produce a market "
-                "band (p25/p50/p75), compute gap_pct if current pay is known, give "
-                "a one-line verdict, and a negotiation plan (timing, a short script, "
-                "talking_points) grounded in evidence.\n\n"
-                f"{anchor}\n{pay_line}\n\n"
-                f"{candidate_context}\n\n" + _HONESTY
-            ),
-        ),
-    ]
-
-
-# --------------------------------------------------------------------------- #
-# Career Weather
-# --------------------------------------------------------------------------- #
-def build_weather_messages(
-    *,
-    role: str,
-    region: str,
-    rising_skills: list[str],
-    cooling_skills: list[str],
-    median_salary_myr: int | None,
-) -> list[ChatMessage]:
-    return [
-        _sys(),
-        ChatMessage(
-            role="user",
-            content=(
-                f"Give the 'career weather' for a {role} in {region}: an outlook "
-                "(sunny|cloudy|stormy), a short summary, a demand_index 0–1, the "
-                "rising_skills and cooling_skills, and an estimated salary_drift_pct. "
-                "Ground rising/cooling strictly in the skill demand signals below; "
-                "do NOT predict the future — describe the current landscape.\n\n"
-                f"Rising-demand skills: {', '.join(rising_skills) or '(none observed)'}\n"
-                f"Cooling-demand skills: {', '.join(cooling_skills) or '(none observed)'}\n"
-                f"Median salary anchor (MYR/month): {median_salary_myr or 'unknown'}\n\n" + _HONESTY
-            ),
-        ),
-    ]
-
-
-# --------------------------------------------------------------------------- #
-# Pivot feasibility
-# --------------------------------------------------------------------------- #
-def build_pivot_messages(
-    *,
-    candidate_context: str,
-    target_occupation: str,
-    target_skills: list[dict[str, Any]],
-    transition: dict[str, Any] | None,
-) -> list[ChatMessage]:
-    needed = (
-        ", ".join(f"{s['skill']} (importance {s['importance']:.1f})" for s in target_skills[:15])
-        or "(no skill profile available)"
-    )
-    tr = (
-        f"Observed transition into this role: weight {transition['weight']:.2f}, "
-        f"median {transition.get('median_months') or '?'} months, "
-        f"salary delta {transition.get('salary_delta_pct')}%."
-        if transition
-        else "No direct observed transition into this role from the current one."
-    )
-    return [
-        _sys(),
-        ChatMessage(
-            role="user",
-            content=(
-                f"Assess the feasibility (0–1) of pivoting into '{target_occupation}'. "
-                "List the skill gap (have vs need) and a concrete ramp plan "
-                "(ordered steps, each with a resource and a months estimate). Ground "
-                "everything in the role's skill needs and the transition evidence.\n\n"
-                f"TARGET ROLE SKILLS: {needed}\n{tr}\n\n"
-                f"{candidate_context}\n\n" + _HONESTY
-            ),
-        ),
-    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -325,30 +187,9 @@ def build_pivot_prose_messages(
     ]
 
 
-# --------------------------------------------------------------------------- #
-# Internal
-# --------------------------------------------------------------------------- #
-def _render_transitions(transitions: list[dict[str, Any]]) -> str:
-    if not transitions:
-        return "  (no observed transitions for this occupation)"
-    out = []
-    for t in transitions:
-        out.append(
-            f"  - {t['title']}: weight {t['weight']:.2f}, "
-            f"~{t.get('median_months') or '?'} months, "
-            f"salary delta {t.get('salary_delta_pct')}%, "
-            f"target median MYR {t.get('median_salary_myr') or '?'}"
-        )
-    return "\n".join(out)
-
-
 __all__ = [
     "build_coach_messages",
     "build_coach_structured_messages",
-    "build_atlas_messages",
-    "build_fair_pay_messages",
-    "build_weather_messages",
-    "build_pivot_messages",
     "build_atlas_prose_messages",
     "build_fair_pay_prose_messages",
     "build_weather_prose_messages",

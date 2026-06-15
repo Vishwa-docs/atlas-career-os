@@ -16,6 +16,7 @@ from app.domains.applications.models import Application
 from app.domains.candidates.models import CandidateProfile
 from app.domains.jobs.models import Job
 from app.domains.signals.models import Signal
+from app.domains.users.models import User
 
 
 class EmployerRepository:
@@ -96,17 +97,18 @@ class EmployerRepository:
         org_id: uuid.UUID,
         statuses: tuple[str, ...],
         limit: int = 25,
-    ) -> list[tuple[Application, Job, CandidateProfile]]:
-        """Applications in given statuses joined to job + candidate profile."""
+    ) -> list[tuple[Application, Job, CandidateProfile, str | None]]:
+        """Applications in given statuses joined to job, candidate, and full name."""
         stmt = (
-            select(Application, Job, CandidateProfile)
+            select(Application, Job, CandidateProfile, User.full_name)
             .join(Job, Job.id == Application.job_id)
             .join(CandidateProfile, CandidateProfile.id == Application.candidate_id)
+            .join(User, User.id == CandidateProfile.user_id, isouter=True)
             .where(Job.org_id == org_id, Application.status.in_(statuses))
             .order_by(Application.updated_at.desc())
             .limit(limit)
         )
-        return [(a, j, c) for a, j, c in (await self.session.execute(stmt)).all()]
+        return [(a, j, c, n) for a, j, c, n in (await self.session.execute(stmt)).all()]
 
     async def open_roles(self, org_id: uuid.UUID, limit: int = 10) -> list[Job]:
         stmt = (

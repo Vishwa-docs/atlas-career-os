@@ -9,6 +9,7 @@ import {
   CalendarHeart,
   CloudSun,
   Compass,
+  Download,
   FileText,
   GraduationCap,
   Heart,
@@ -65,6 +66,7 @@ export const candidateNav: NavSection[] = [
     heading: "Grow",
     items: [
       { label: "Profile & Résumé", path: "/app/profile", icon: FileText, tier: "A" },
+      { label: "CV / PDF export", path: "/app/cv", icon: Download, tier: "A" },
       { label: "Living Portfolio", path: "/app/portfolio", icon: ScrollText, tier: "B" },
       { label: "Life Chapters", path: "/app/life-chapters", icon: CalendarHeart, tier: "B" },
       { label: "Learning Wallet", path: "/app/wallet", icon: Wallet, tier: "C" },

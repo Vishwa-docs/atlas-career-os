@@ -45,11 +45,14 @@ class CandidateSummary(BaseModel):
     """Consent-aware, minimal candidate projection for employer-facing matches."""
 
     id: str
+    full_name: str
     headline: str | None = None
+    current_role: str | None = None
     location: str | None = None
     years_experience: float = 0.0
     open_to_work: bool = True
     top_skills: list[str] = Field(default_factory=list)
+    avatar_url: str | None = None
     consent_basis: str = Field(
         default="open_to_work",
         description="Why this candidate is visible: 'consent_grant' or 'open_to_work'.",
@@ -72,6 +75,7 @@ class CandidateMatch(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
     sub_scores: SubScores
     glass_box: GlassBox
+    consent_note: str | None = None
 
 
 __all__ = [

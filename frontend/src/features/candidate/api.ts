@@ -69,10 +69,66 @@ export interface CandidateDashboard {
   completeness?: number;
 }
 
+/**
+ * Aggregate counters the backend may surface as an object instead of a
+ * pre-built tile array. Mirrors the alternate `stats` object shape:
+ * `{applications, matches, profile_completeness, market_percentile}`.
+ */
+interface DashboardStatsObject {
+  applications?: number;
+  matches?: number;
+  profile_completeness?: number;
+  market_percentile?: number | null;
+}
+
+/** Exactly what `GET /candidates/me/dashboard` puts on the wire. */
+interface CandidateDashboardWire {
+  stats: DashboardStat[] | DashboardStatsObject;
+  recent_matches?: RecentMatch[];
+  nudges?: CoachNudge[];
+  market_snapshot?: MarketSnapshot | null;
+  completeness?: number;
+}
+
+/** Turn the `stats` object form into the StatCard array the UI renders. */
+function statsObjectToTiles(s: DashboardStatsObject): DashboardStat[] {
+  return [
+    { label: "Applications", value: s.applications ?? 0, tone: "brand" },
+    {
+      label: "Matches",
+      value: s.matches ?? 0,
+      hint: "Roles aligned to your trajectory",
+    },
+    {
+      label: "Profile complete",
+      value: `${Math.round(s.profile_completeness ?? 0)}%`,
+      tone: (s.profile_completeness ?? 0) >= 80 ? "success" : "warning",
+    },
+    {
+      label: "Market percentile",
+      value: s.market_percentile != null ? `${Math.round(s.market_percentile)}%` : "—",
+      hint: s.market_percentile != null ? undefined : "Set a target occupation",
+    },
+  ];
+}
+
+/** Normalise the wire payload into the shape the dashboard component consumes. */
+function normalizeDashboard(raw: CandidateDashboardWire): CandidateDashboard {
+  const stats = Array.isArray(raw.stats) ? raw.stats : statsObjectToTiles(raw.stats);
+  return {
+    stats,
+    recent_matches: raw.recent_matches ?? [],
+    nudges: raw.nudges ?? [],
+    market_snapshot: raw.market_snapshot ?? null,
+    completeness: raw.completeness,
+  };
+}
+
 export function useDashboard() {
   return useQuery({
     queryKey: ["candidate", "dashboard"],
-    queryFn: () => api.get<CandidateDashboard>("/candidates/me/dashboard"),
+    queryFn: () => api.get<CandidateDashboardWire>("/candidates/me/dashboard"),
+    select: normalizeDashboard,
   });
 }
 

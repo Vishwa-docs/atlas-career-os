@@ -4,12 +4,10 @@ import {
   Building2,
   Cpu,
   DollarSign,
-  Sparkles,
+  GraduationCap,
   Users,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -45,59 +43,6 @@ function prettyLabel(s: string) {
   return s
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function TrendCard({ data }: { data: { date: string; value: number }[] }) {
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <SectionHeading title="New signups" description="Daily new accounts across the platform" />
-        {data.length === 0 ? (
-          <EmptyState icon={Users} title="No signup data yet" />
-        ) : (
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="signupFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--brand))" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="hsl(var(--brand))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                  tickFormatter={(d: string) =>
-                    new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-                  }
-                  tickLine={false}
-                  axisLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                  width={36}
-                />
-                <RechartsTooltip contentStyle={TOOLTIP_STYLE} />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  name="Signups"
-                  stroke="hsl(var(--brand))"
-                  strokeWidth={2}
-                  fill="url(#signupFill)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
 }
 
 function BreakdownCard({
@@ -188,9 +133,8 @@ export default function Overview() {
     );
   }
 
-  const trend = data.new_users_trend ?? [];
-  const byRole = data.signups_by_role ?? [];
-  const byType = data.orgs_by_type ?? [];
+  const byRole = data.signups_by_role;
+  const byType = data.orgs_by_type;
 
   return (
     <div className="animate-fade-in">
@@ -204,68 +148,44 @@ export default function Overview() {
         <StatCard
           label="Total users"
           value={data.total_users.toLocaleString()}
-          hint={
-            data.active_users_30d != null
-              ? `${data.active_users_30d.toLocaleString()} active in 30d`
-              : undefined
-          }
+          hint={`${data.candidates.toLocaleString()} candidates`}
           icon={Users}
           tone="brand"
         />
         <StatCard
           label="Organizations"
           value={data.total_orgs.toLocaleString()}
-          hint="Employer + university tenants"
+          hint={`${data.employers.toLocaleString()} employers · ${data.universities.toLocaleString()} universities`}
           icon={Building2}
         />
         <StatCard
           label="Open jobs"
-          value={(data.total_jobs ?? 0).toLocaleString()}
-          hint={
-            data.total_applications != null
-              ? `${data.total_applications.toLocaleString()} applications`
-              : undefined
-          }
+          value={data.total_jobs.toLocaleString()}
+          hint={`${data.total_applications.toLocaleString()} applications`}
           icon={Briefcase}
         />
         <StatCard
-          label="AI spend (30d)"
-          value={formatCurrency(data.ai_cost_usd_30d ?? 0, "USD", "en-US")}
-          hint={
-            data.ai_calls_30d != null
-              ? `${data.ai_calls_30d.toLocaleString()} AI calls`
-              : undefined
-          }
+          label="AI spend"
+          value={formatCurrency(data.ai_cost_usd_30d, "USD", "en-US")}
+          hint={`${data.ai_calls_30d.toLocaleString()} AI calls`}
           icon={DollarSign}
           tone="warning"
         />
       </div>
 
-      {(data.total_matches != null || data.ai_calls_30d != null) && (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {data.total_matches != null && (
-            <StatCard label="Matches computed" value={data.total_matches.toLocaleString()} icon={Sparkles} />
-          )}
-          {data.ai_calls_30d != null && (
-            <StatCard label="AI calls (30d)" value={data.ai_calls_30d.toLocaleString()} icon={Cpu} />
-          )}
-        </div>
-      )}
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <TrendCard data={trend} />
-        </div>
-        <div className="lg:col-span-2">
-          <BreakdownCard
-            title="Signups by role"
-            description="Who's joining the platform"
-            data={byRole}
-          />
-        </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Candidates" value={data.candidates.toLocaleString()} icon={Users} />
+        <StatCard label="Employers" value={data.employers.toLocaleString()} icon={Building2} />
+        <StatCard label="Universities" value={data.universities.toLocaleString()} icon={GraduationCap} />
+        <StatCard label="AI calls" value={data.ai_calls_30d.toLocaleString()} icon={Cpu} />
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <BreakdownCard
+          title="Signups by role"
+          description="Who's joining the platform"
+          data={byRole}
+        />
         <BreakdownCard
           title="Organizations by type"
           description="Tenant mix across employers and universities"

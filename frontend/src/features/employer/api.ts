@@ -29,20 +29,21 @@ export interface PipelineStage {
 
 export interface DashboardActivity {
   id: string;
-  kind?: string;
+  kind: string;
   title: string;
-  detail?: string;
-  at: string;
+  detail?: string | null;
+  at?: string | null;
 }
 
+/** Mirrors backend employers/schemas.py EmployerDashboard (object, not array). */
 export interface EmployerDashboard {
   open_roles: number;
   pipeline: PipelineStage[];
   time_to_fill: number | null; // days
   flight_risk_count: number;
-  applications_total?: number;
-  offers_out?: number;
-  recent_activity?: DashboardActivity[];
+  applications_total: number;
+  offers_out: number;
+  recent_activity: DashboardActivity[];
 }
 
 export function useEmployerDashboard() {
@@ -56,17 +57,21 @@ export function useEmployerDashboard() {
  * Talent Search — GET /matching/candidates?job_id&q
  * ------------------------------------------------------------------------- */
 
+/** Mirrors backend matching/schemas.py CandidateSummary exactly. */
 export interface CandidateSummary {
   id: string;
   full_name: string;
-  headline?: string;
-  location?: string;
-  current_role?: string;
-  top_skills?: string[];
-  years_experience?: number;
+  headline?: string | null;
+  current_role?: string | null;
+  location?: string | null;
+  years_experience: number;
+  open_to_work: boolean;
+  top_skills: string[];
   avatar_url?: string | null;
+  consent_basis: string; // "consent_grant" | "open_to_work"
 }
 
+/** Mirrors backend matching/schemas.py CandidateMatch (a bare array is returned). */
 export interface CandidateMatch {
   candidate_summary: CandidateSummary;
   score: number;
@@ -77,7 +82,7 @@ export interface CandidateMatch {
     salary_fit: number;
   };
   glass_box: GlassBox;
-  consent_note?: string;
+  consent_note?: string | null;
 }
 
 export function useCandidateMatches(params: { job_id?: string; q?: string; limit?: number }) {
@@ -89,7 +94,8 @@ export function useCandidateMatches(params: { job_id?: string; q?: string; limit
         q: params.q || undefined,
         limit: params.limit ?? 20,
       }),
-    enabled: !!params.job_id || !!params.q,
+    // Backend requires job_id (a 422 otherwise); only fire once a role is selected.
+    enabled: !!params.job_id,
   });
 }
 
@@ -173,24 +179,23 @@ export type PipelineStatus =
   | "rejected"
   | "withdrawn";
 
+/** Mirrors backend applications/schemas.py PipelineApplication (bare array). */
 export interface PipelineApplication {
   id: string;
-  candidate_id?: string;
+  candidate_id: string;
   candidate_name: string;
-  headline?: string;
+  headline?: string | null;
   status: PipelineStatus | string;
-  match_score?: number;
-  applied_at?: string;
+  match_score?: number | null;
+  applied_at?: string | null;
   avatar_url?: string | null;
 }
 
 export function useJobApplications(jobId: string | undefined) {
   return useQuery({
     queryKey: ["employer", "applications", jobId],
-    queryFn: () =>
-      api.get<Paginated<PipelineApplication> | PipelineApplication[]>(
-        `/jobs/${jobId}/applications`,
-      ),
+    // GET /jobs/:id/applications returns a bare array of PipelineApplication.
+    queryFn: () => api.get<PipelineApplication[]>(`/jobs/${jobId}/applications`),
     enabled: !!jobId,
   });
 }
@@ -220,27 +225,31 @@ export interface SignalEvidence {
   detail?: string;
 }
 
+/** Mirrors backend signals/schemas.py SignalRead. */
 export interface RetentionSignal {
   id: string;
-  type?: string;
-  subject_name?: string;
+  type: string;
+  subject_candidate_id: string;
+  subject_name?: string | null;
   title: string;
-  summary?: string;
-  severity?: "low" | "medium" | "high";
+  summary?: string | null;
+  severity?: "low" | "medium" | "high" | null;
   status: SignalStatus | string;
-  evidence?: SignalEvidence[];
+  evidence: SignalEvidence[];
   glass_box: GlassBox;
-  detected_at?: string;
+  detected_at?: string | null;
 }
 
 export function useSignals(params?: { type?: string; status?: string }) {
   return useQuery({
     queryKey: ["employer", "signals", params ?? {}],
+    // GET /signals returns a Page envelope; flatten to the items array for the UI.
     queryFn: () =>
-      api.get<Paginated<RetentionSignal> | RetentionSignal[]>("/signals", {
+      api.get<Paginated<RetentionSignal>>("/signals", {
         type: params?.type || undefined,
         status: params?.status || undefined,
       }),
+    select: (page): RetentionSignal[] => page.items,
   });
 }
 
@@ -259,25 +268,29 @@ export function useUpdateSignal() {
  * Re-Engagement — GET /employers/reengagement
  * ------------------------------------------------------------------------- */
 
+/** Mirrors backend employers/schemas.py ReengagementCandidate. */
 export interface WarmBenchCandidate {
   id: string;
   full_name: string;
-  headline?: string;
-  former_role?: string;
-  reason?: string;
-  last_contact?: string;
-  fit_score?: number;
-  avatar_url?: string | null;
-  glass_box?: GlassBox;
+  headline?: string | null;
+  former_role?: string | null;
+  reason?: string | null;
+  fit_score?: number | null;
+  suggested_job_id?: string | null;
+  glass_box: GlassBox;
+}
+
+/** Backend response envelope: { items: ReengagementCandidate[] }. */
+interface ReengagementReport {
+  items: WarmBenchCandidate[];
 }
 
 export function useReEngagement() {
   return useQuery({
     queryKey: ["employer", "reengagement"],
-    queryFn: () =>
-      api.get<Paginated<WarmBenchCandidate> | WarmBenchCandidate[]>(
-        "/employers/reengagement",
-      ),
+    // GET /employers/reengagement returns { items: [...] }, not a bare array.
+    queryFn: () => api.get<ReengagementReport>("/employers/reengagement"),
+    select: (report): WarmBenchCandidate[] => report.items,
   });
 }
 
@@ -285,25 +298,28 @@ export function useReEngagement() {
  * Onboarding Risk — GET /employers/onboarding
  * ------------------------------------------------------------------------- */
 
+/** Mirrors backend employers/schemas.py OnboardingRisk. */
 export interface OnboardingRiskItem {
   id: string;
   full_name: string;
-  role?: string;
-  start_date?: string;
-  days_in?: number;
-  risk_level?: "low" | "medium" | "high";
-  risk_score?: number;
+  headline?: string | null;
+  role?: string | null;
+  risk_level?: "low" | "medium" | "high" | null;
+  risk_score: number;
   glass_box: GlassBox;
-  avatar_url?: string | null;
+}
+
+/** Backend response envelope: { items: OnboardingRisk[] }. */
+interface OnboardingReport {
+  items: OnboardingRiskItem[];
 }
 
 export function useOnboardingRisk() {
   return useQuery({
     queryKey: ["employer", "onboarding"],
-    queryFn: () =>
-      api.get<Paginated<OnboardingRiskItem> | OnboardingRiskItem[]>(
-        "/employers/onboarding",
-      ),
+    // GET /employers/onboarding returns { items: [...] }, not a bare array.
+    queryFn: () => api.get<OnboardingReport>("/employers/onboarding"),
+    select: (report): OnboardingRiskItem[] => report.items,
   });
 }
 

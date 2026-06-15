@@ -173,9 +173,11 @@ export default function Dashboard() {
                         {a.detail && (
                           <p className="truncate text-xs text-muted-foreground">{a.detail}</p>
                         )}
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(a.at).toLocaleString()}
-                        </p>
+                        {a.at && (
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(a.at).toLocaleString()}
+                          </p>
+                        )}
                       </div>
                     </li>
                   ))}

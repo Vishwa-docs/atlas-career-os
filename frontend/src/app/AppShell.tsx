@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LogOut, Moon, Sun } from "lucide-react";
 import { AtlasWordmark } from "@/components/logo";
 import { Spinner } from "@/components/common";
@@ -17,15 +17,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { cn, initials } from "@/lib/utils";
 import { useAuth } from "@/stores/auth";
+import { NotificationBell } from "@/features/notifications/NotificationBell";
+import { useNotificationsRealtime } from "@/features/notifications/api";
 import { useTheme } from "./theme";
 import { WORKSPACE_LABEL, WORKSPACE_NAV, workspaceForUser } from "./nav";
 
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { theme, toggle } = useTheme();
+  useNotificationsRealtime();
 
   if (!user) return null;
   const workspace = workspaceForUser(user);
@@ -92,6 +97,7 @@ export function AppShell() {
             Welcome back, <span className="font-medium text-foreground">{user.full_name.split(" ")[0]}</span>
           </div>
           <div className="flex items-center gap-2">
+            <NotificationBell />
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
@@ -124,15 +130,17 @@ export function AppShell() {
 
         <main className="flex-1 px-5 py-6 sm:px-8 sm:py-8">
           <div className="mx-auto max-w-7xl">
-            <Suspense
-              fallback={
-                <div className="flex h-64 items-center justify-center">
-                  <Spinner className="h-6 w-6 text-brand" />
-                </div>
-              }
-            >
-              <Outlet />
-            </Suspense>
+            <ErrorBoundary resetKey={location.pathname}>
+              <Suspense
+                fallback={
+                  <div className="flex h-64 items-center justify-center">
+                    <Spinner className="h-6 w-6 text-brand" />
+                  </div>
+                }
+              >
+                <Outlet />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </main>
       </div>

@@ -21,12 +21,7 @@ from app.domains.ai.llm.factory import get_llm
 from app.domains.ai.schemas import Citation, CitationSourceType, Confidence, GlassBox
 from app.domains.ai.usage import record_usage
 from app.domains.applications import repository as app_repo
-from app.domains.applications.schemas import (
-    ApplicationEventRead,
-    ApplicationRead,
-    CandidateSummary,
-    PipelineEntry,
-)
+from app.domains.applications.schemas import PipelineApplication
 from app.domains.jobs import repository as repo
 from app.domains.jobs.models import Job
 from app.domains.jobs.schemas import (
@@ -58,6 +53,20 @@ async def _embed(text: str) -> list[float] | None:
 # --------------------------------------------------------------------------- #
 # Search
 # --------------------------------------------------------------------------- #
+async def _jobs_page(
+    session: AsyncSession, items: list[Job], total: int, page: PageParams
+) -> Page[JobRead]:
+    """Wrap jobs into a page, enriched with each job's organization name."""
+    org_names = await repo.org_names_for_jobs(session, [j.org_id for j in items])
+    reads: list[JobRead] = []
+    for j in items:
+        read = JobRead.model_validate(j)
+        read.org_name = org_names.get(j.org_id)
+        read.company = read.org_name
+        reads.append(read)
+    return Page[JobRead](items=reads, total=total, page=page.page, page_size=page.page_size)
+
+
 async def search_jobs(
     session: AsyncSession,
     *,
@@ -67,8 +76,22 @@ async def search_jobs(
     work_mode: str | None,
     semantic: bool,
     page: PageParams,
+    mine_org_id: str | None = None,
 ) -> Page[JobRead]:
-    """Keyword+facet search, or hybrid vector+keyword RRF when ``semantic`` and ``q``."""
+    """Keyword+facet search, hybrid RRF when ``semantic``+``q``, or org-scoped via ``mine``."""
+    if mine_org_id:
+        items, total = await repo.search_org(
+            session,
+            uuid.UUID(mine_org_id),
+            q=q,
+            location=location,
+            seniority=seniority,
+            work_mode=work_mode,
+            offset=page.offset,
+            limit=page.limit,
+        )
+        return await _jobs_page(session, items, total, page)
+
     if semantic and q:
         vec = await _embed(q)
         if vec is not None:
@@ -82,12 +105,7 @@ async def search_jobs(
                 offset=page.offset,
                 limit=page.limit,
             )
-            return Page[JobRead](
-                items=[JobRead.model_validate(j) for j in items],
-                total=total,
-                page=page.page,
-                page_size=page.page_size,
-            )
+            return await _jobs_page(session, items, total, page)
     items, total = await repo.search_keyword(
         session,
         q=q,
@@ -97,12 +115,7 @@ async def search_jobs(
         offset=page.offset,
         limit=page.limit,
     )
-    return Page[JobRead](
-        items=[JobRead.model_validate(j) for j in items],
-        total=total,
-        page=page.page,
-        page_size=page.page_size,
-    )
+    return await _jobs_page(session, items, total, page)
 
 
 # --------------------------------------------------------------------------- #
@@ -123,7 +136,11 @@ async def get_job(session: AsyncSession, job_id: uuid.UUID) -> JobRead:
     # The UPDATE bumped the server-side ``updated_at``; refresh so serialization
     # doesn't trigger a lazy load outside the async greenlet.
     await session.refresh(job)
-    return JobRead.model_validate(job)
+    read = JobRead.model_validate(job)
+    org_names = await repo.org_names_for_jobs(session, [job.org_id])
+    read.org_name = org_names.get(job.org_id)
+    read.company = read.org_name
+    return read
 
 
 # --------------------------------------------------------------------------- #
@@ -368,50 +385,68 @@ async def debias_job(
 # --------------------------------------------------------------------------- #
 async def job_pipeline(
     session: AsyncSession, principal: Principal, job_id: uuid.UUID
-) -> list[PipelineEntry]:
-    """Return the application pipeline for a job (same-org employers only)."""
+) -> list[PipelineApplication]:
+    """Return a flat application pipeline for a job (same-org employers only)."""
     job = await _require_job(session, job_id)
     require_same_org(str(job.org_id), principal)
 
     applications = await app_repo.list_for_job(session, job_id)
-    events_map = await app_repo.events_for_many(session, [a.id for a in applications])
-    summaries = await _candidate_summaries(session, [a.candidate_id for a in applications])
+    candidate_ids = [a.candidate_id for a in applications]
+    cards = await _candidate_cards(session, candidate_ids)
+    scores = await _match_scores(session, job_id, candidate_ids)
 
-    entries: list[PipelineEntry] = []
+    out: list[PipelineApplication] = []
     for application in applications:
-        entries.append(
-            PipelineEntry(
-                application=ApplicationRead.model_validate(application),
-                candidate_summary=summaries.get(application.candidate_id),
-                events=[
-                    ApplicationEventRead.model_validate(e)
-                    for e in events_map.get(application.id, [])
-                ],
+        name, headline = cards.get(
+            application.candidate_id, ("Candidate", None)
+        )
+        out.append(
+            PipelineApplication(
+                id=application.id,
+                candidate_id=application.candidate_id,
+                candidate_name=name,
+                headline=headline,
+                status=application.status,
+                match_score=scores.get(application.candidate_id),
+                applied_at=application.created_at,
             )
         )
-    return entries
+    return out
 
 
-async def _candidate_summaries(
+async def _candidate_cards(
     session: AsyncSession, candidate_ids: Sequence[uuid.UUID]
-) -> dict[uuid.UUID, CandidateSummary]:
-    """Best-effort candidate cards keyed by candidate profile id."""
+) -> dict[uuid.UUID, tuple[str, str | None]]:
+    """Map candidate profile id → (full_name, headline). Best-effort."""
     if not candidate_ids:
         return {}
     try:
         from app.domains.candidates.models import CandidateProfile
+        from app.domains.users.models import User
     except ImportError:  # pragma: no cover
         return {}
-    rows = await session.scalars(
-        select(CandidateProfile).where(CandidateProfile.id.in_(list(candidate_ids)))
+    rows = await session.execute(
+        select(CandidateProfile.id, CandidateProfile.headline, User.full_name)
+        .join(User, User.id == CandidateProfile.user_id, isouter=True)
+        .where(CandidateProfile.id.in_(list(candidate_ids)))
     )
-    return {
-        p.id: CandidateSummary(
-            candidate_id=p.id,
-            user_id=p.user_id,
-            headline=p.headline,
-            location=p.location,
-            years_experience=p.years_experience,
+    return {cid: (name or "Candidate", headline) for cid, headline, name in rows.all()}
+
+
+async def _match_scores(
+    session: AsyncSession, job_id: uuid.UUID, candidate_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, float]:
+    """Cached match scores for these candidates against the job (best-effort)."""
+    if not candidate_ids:
+        return {}
+    try:
+        from app.domains.matching.models import MatchResult
+    except ImportError:  # pragma: no cover
+        return {}
+    rows = await session.execute(
+        select(MatchResult.candidate_id, MatchResult.score).where(
+            MatchResult.job_id == job_id,
+            MatchResult.candidate_id.in_(list(candidate_ids)),
         )
-        for p in rows
-    }
+    )
+    return {cid: float(score) for cid, score in rows.all() if score is not None}

@@ -63,6 +63,8 @@ class JobRead(ORMModel):
 
     id: uuid.UUID
     org_id: uuid.UUID
+    org_name: str | None = None
+    company: str | None = None
     posted_by: uuid.UUID | None = None
     title: str
     occupation_id: uuid.UUID | None = None

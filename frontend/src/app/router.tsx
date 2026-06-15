@@ -19,6 +19,7 @@ const JobDetail = lazy(() => import("@/features/candidate/pages/JobDetail"));
 const Applications = lazy(() => import("@/features/candidate/pages/Applications"));
 const FairPay = lazy(() => import("@/features/candidate/pages/FairPay"));
 const ProfileBuilder = lazy(() => import("@/features/candidate/pages/ProfileBuilder"));
+const CvBuilder = lazy(() => import("@/features/candidate/pages/CvBuilder"));
 const LivingPortfolio = lazy(() => import("@/features/candidate/pages/LivingPortfolio"));
 const LifeChapters = lazy(() => import("@/features/candidate/pages/LifeChapters"));
 const LearningWallet = lazy(() => import("@/features/candidate/pages/LearningWallet"));
@@ -77,6 +78,7 @@ export function AppRoutes() {
         <Route path="applications" element={<Applications />} />
         <Route path="pay" element={<FairPay />} />
         <Route path="profile" element={<ProfileBuilder />} />
+        <Route path="cv" element={<CvBuilder />} />
         <Route path="portfolio" element={<LivingPortfolio />} />
         <Route path="life-chapters" element={<LifeChapters />} />
         <Route path="wallet" element={<LearningWallet />} />

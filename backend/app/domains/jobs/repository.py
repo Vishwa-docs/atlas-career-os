@@ -14,6 +14,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.jobs.models import Job
+from app.domains.organizations.models import Organization
 
 # RRF damping constant — the standard k=60 from the original paper.
 _RRF_K = 60
@@ -172,3 +173,44 @@ async def list_jobs_for_org(session: AsyncSession, org_id: uuid.UUID) -> list[Jo
         select(Job).where(Job.org_id == org_id).order_by(Job.created_at.desc())
     )
     return list(rows)
+
+
+async def search_org(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    q: str | None,
+    location: str | None,
+    seniority: str | None,
+    work_mode: str | None,
+    offset: int,
+    limit: int,
+) -> tuple[list[Job], int]:
+    """All of one org's jobs (any status), newest first, with filters + count."""
+    stmt = select(Job).where(Job.org_id == org_id)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(or_(Job.title.ilike(like), Job.description.ilike(like)))
+    if location:
+        stmt = stmt.where(Job.location.ilike(f"%{location}%"))
+    if seniority:
+        stmt = stmt.where(Job.seniority == seniority)
+    if work_mode:
+        stmt = stmt.where(Job.work_mode == work_mode)
+    total = await session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    rows = await session.scalars(stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit))
+    return list(rows), int(total or 0)
+
+
+async def org_names_for_jobs(
+    session: AsyncSession, org_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Map org id → org name for the given jobs (one batched query)."""
+    if not org_ids:
+        return {}
+    rows = await session.execute(
+        select(Organization.id, Organization.name).where(
+            Organization.id.in_(list(set(org_ids)))
+        )
+    )
+    return dict(rows.all())

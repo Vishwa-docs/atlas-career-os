@@ -1,9 +1,9 @@
-import { CalendarClock, HeartPulse, ShieldAlert } from "lucide-react";
+import { HeartPulse, ShieldAlert } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/common";
 import { GlassBoxPanel } from "@/components/glass-box";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPercent, initials } from "@/lib/utils";
@@ -21,15 +21,16 @@ function RiskCard({ item }: { item: OnboardingRiskItem }) {
       <CardContent className="space-y-4 p-5">
         <div className="flex items-start gap-3">
           <Avatar className="h-11 w-11">
-            {item.avatar_url && <AvatarImage src={item.avatar_url} alt={item.full_name} />}
             <AvatarFallback>{initials(item.full_name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="truncate font-semibold">{item.full_name}</h3>
-                {item.role && (
-                  <p className="truncate text-sm text-muted-foreground">{item.role}</p>
+                {(item.role || item.headline) && (
+                  <p className="truncate text-sm text-muted-foreground">
+                    {item.role || item.headline}
+                  </p>
                 )}
               </div>
               {item.risk_level && (
@@ -38,15 +39,6 @@ function RiskCard({ item }: { item: OnboardingRiskItem }) {
                 </Badge>
               )}
             </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-              {item.start_date && (
-                <span className="flex items-center gap-1">
-                  <CalendarClock className="h-3.5 w-3.5" />
-                  Started {new Date(item.start_date).toLocaleDateString()}
-                </span>
-              )}
-              {item.days_in != null && <span>Day {item.days_in} of 60</span>}
-            </p>
           </div>
         </div>
 

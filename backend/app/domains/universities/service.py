@@ -22,6 +22,7 @@ from app.domains.ai.schemas import (
 from app.domains.universities.models import Internship
 from app.domains.universities.repository import UniversityRepository
 from app.domains.universities.schemas import (
+    CurriculumGap,
     CurriculumReport,
     FieldRate,
     InternshipCreate,
@@ -70,16 +71,39 @@ class UniversityService:
 
     # ----------------------------- dashboard -------------------------- #
     async def dashboard(self, org_id: uuid.UUID) -> UniversityDashboard:
-        cohorts = await self.repo.count_cohorts(org_id)
         grads = await self.repo.tracked_graduates(org_id)
+        active = await self.repo.active_students(org_id)
+        programs = await self.repo.program_count(org_id)
+        internships_open = await self.repo.open_internship_count(org_id)
+        credentials = await self.repo.credentials_issued(org_id)
         rows = await self.repo.outcomes(org_id)
         statuses = [o.status for o, _ in rows]
+
+        # Employment-rate (and median salary) trend by graduating year.
+        trend_acc: dict[int, list[tuple[str, int | None]]] = {}
+        for outcome, cohort in rows:
+            trend_acc.setdefault(cohort.graduation_year, []).append(
+                (outcome.status, outcome.salary_myr)
+            )
+        trend = [
+            TrendPoint(
+                year=y,
+                employment_rate=_employment_rate([s for s, _ in pairs]),
+                median_salary=_median_int([sal for _, sal in pairs]),
+            )
+            for y, pairs in sorted(trend_acc.items())
+        ]
+
         return UniversityDashboard(
-            cohorts=cohorts,
-            tracked_graduates=grads,
             employment_rate=_employment_rate(statuses),
             median_salary=_median_int([o.salary_myr for o, _ in rows]),
             median_months_to_employ=_median_float([o.months_to_employment for o, _ in rows]),
+            active_students=active,
+            graduates_tracked=grads,
+            programs=programs,
+            internships_open=internships_open,
+            credentials_issued=credentials,
+            trend=trend,
         )
 
     # ----------------------------- outcomes --------------------------- #
@@ -92,20 +116,35 @@ class UniversityService:
         rows = await self.repo.outcomes(org_id, cohort_id, year)
         statuses = [o.status for o, _ in rows]
 
-        # By field (cohort faculty/program).
-        by_field_acc: dict[str, list[str]] = {}
+        # By field (cohort faculty/program): rate, median salary, graduate count.
+        by_field_acc: dict[str, list[tuple[str, int | None]]] = {}
         for outcome, cohort in rows:
             field = cohort.faculty or cohort.program or "General"
-            by_field_acc.setdefault(field, []).append(outcome.status)
+            by_field_acc.setdefault(field, []).append((outcome.status, outcome.salary_myr))
         by_field = [
-            FieldRate(field=f, rate=_employment_rate(s)) for f, s in sorted(by_field_acc.items())
+            FieldRate(
+                field=f,
+                employment_rate=_employment_rate([s for s, _ in pairs]),
+                median_salary=_median_int([sal for _, sal in pairs]),
+                graduates=len(pairs),
+            )
+            for f, pairs in sorted(by_field_acc.items())
         ]
 
-        # Trend by graduation year.
-        trend_acc: dict[int, list[str]] = {}
+        # Trend by graduation year: rate + median salary.
+        trend_acc: dict[int, list[tuple[str, int | None]]] = {}
         for outcome, cohort in rows:
-            trend_acc.setdefault(cohort.graduation_year, []).append(outcome.status)
-        trend = [TrendPoint(year=y, rate=_employment_rate(s)) for y, s in sorted(trend_acc.items())]
+            trend_acc.setdefault(cohort.graduation_year, []).append(
+                (outcome.status, outcome.salary_myr)
+            )
+        trend = [
+            TrendPoint(
+                year=y,
+                employment_rate=_employment_rate([s for s, _ in pairs]),
+                median_salary=_median_int([sal for _, sal in pairs]),
+            )
+            for y, pairs in sorted(trend_acc.items())
+        ]
 
         return OutcomesReport(
             employment_rate=_employment_rate(statuses),
@@ -119,17 +158,19 @@ class UniversityService:
     async def students(self, org_id: uuid.UUID) -> StudentRoster:
         rows = await self.repo.roster(org_id)
         items: list[StudentRosterEntry] = []
-        for student, cohort, profile in rows:
+        for student, cohort, profile, full_name in rows:
             skills = await self.repo.candidate_skills(profile.id)
             score = self._readiness_score(profile, skills)
             items.append(
                 StudentRosterEntry(
-                    candidate_id=str(profile.id),
-                    cohort_id=str(cohort.id),
+                    id=str(profile.id),
+                    full_name=full_name or "Student",
                     student_ref=student.student_ref,
                     headline=profile.headline,
                     program=cohort.program,
-                    graduation_year=cohort.graduation_year,
+                    field=cohort.faculty or cohort.program,
+                    year=cohort.graduation_year,
+                    cohort=cohort.program,
                     readiness_score=score,
                 )
             )
@@ -150,7 +191,7 @@ class UniversityService:
         row = await self.repo.student_in_org(org_id, candidate_id)
         if row is None:
             return None
-        _student, cohort, profile = row
+        _student, cohort, profile, full_name = row
         skills = await self.repo.candidate_skills(candidate_id)
         events = await self.repo.candidate_events(candidate_id)
         base = self._readiness_score(profile, skills)
@@ -185,7 +226,11 @@ class UniversityService:
                     user_id=user_id,
                 )
             result.candidate_id = str(candidate_id)
+            result.student_name = full_name
+            result.program = cohort.program
             result.score = base
+            if not result.dimensions:
+                result.dimensions = self._heuristic_dimensions(skills, events)
             if not result.glass_box.citations:
                 result.glass_box.citations.append(
                     Citation(
@@ -196,35 +241,41 @@ class UniversityService:
                 )
             return result
         except Exception:  # noqa: BLE001 - degrade gracefully
-            return self._heuristic_readiness(candidate_id, base, skills, events)
+            profile_out = self._heuristic_readiness(candidate_id, base, skills, events)
+            profile_out.student_name = full_name
+            profile_out.program = cohort.program
+            return profile_out
 
-    def _heuristic_readiness(
-        self, candidate_id: uuid.UUID, base: float, skills, events
-    ) -> ReadinessProfile:
+    @staticmethod
+    def _heuristic_dimensions(skills, events) -> list[ReadinessDimension]:
         breadth = min(len(skills) / 10.0, 1.0)
         exposure = min(len(events) / 5.0, 1.0)
         prof = sum(cs.proficiency for cs, _ in skills) / len(skills) if skills else 0.0
-        dims = [
+        return [
             ReadinessDimension(
                 name="Technical depth",
                 score=round(prof, 2),
-                note="Mean proficiency across recorded skills.",
+                detail="Mean proficiency across recorded skills.",
             ),
             ReadinessDimension(
                 name="Skill breadth",
                 score=round(breadth, 2),
-                note=f"{len(skills)} skills recorded.",
+                detail=f"{len(skills)} skills recorded.",
             ),
             ReadinessDimension(
                 name="Industry exposure",
                 score=round(exposure, 2),
-                note=f"{len(events)} career events recorded.",
+                detail=f"{len(events)} career events recorded.",
             ),
         ]
+
+    def _heuristic_readiness(
+        self, candidate_id: uuid.UUID, base: float, skills, events
+    ) -> ReadinessProfile:
         return ReadinessProfile(
             candidate_id=str(candidate_id),
             score=base,
-            dimensions=dims,
+            dimensions=self._heuristic_dimensions(skills, events),
             glass_box=GlassBox(
                 rationale=(
                     "Readiness blends profile depth, skill breadth, and mean "
@@ -254,14 +305,38 @@ class UniversityService:
         program = cohorts[0].program if cohorts else "Program"
         covered = sorted(await self.repo.cohort_skill_names(org_id))
         demand_skills = await self.repo.top_demand_skills()
-        market = [MarketSkill(skill=s.name, demand=round(s.demand_trend, 3)) for s in demand_skills]
         covered_lower = {c.lower() for c in covered}
-        gaps = [s.name for s in demand_skills if s.name.lower() not in covered_lower]
+
+        # Normalise demand_trend (≈0..0.8) to a 0..1 demand intensity for the UI.
+        def _demand(skill) -> float:
+            return round(min(1.0, max(0.0, float(skill.demand_trend))), 3)
+
+        market = [
+            MarketSkill(
+                skill=s.name,
+                demand=_demand(s),
+                coverage=1.0 if s.name.lower() in covered_lower else 0.0,
+            )
+            for s in demand_skills
+        ]
+
+        gap_skills = [s for s in demand_skills if s.name.lower() not in covered_lower]
+        gaps = [
+            CurriculumGap(
+                skill=s.name,
+                demand=_demand(s),
+                severity=(
+                    "high" if _demand(s) >= 0.66 else "medium" if _demand(s) >= 0.4 else "low"
+                ),
+                recommendation=f"Introduce {s.name} into the {program} curriculum.",
+            )
+            for s in gap_skills
+        ]
 
         context = (
             f"Program: {program}. Covered skills: {', '.join(covered) or 'none'}. "
             f"Rising market skills: {', '.join(s.name for s in demand_skills) or 'none'}. "
-            f"Apparent gaps: {', '.join(gaps) or 'none'}."
+            f"Apparent gaps: {', '.join(s.name for s in gap_skills) or 'none'}."
         )
         gb: GlassBox
         try:

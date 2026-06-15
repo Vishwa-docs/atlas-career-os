@@ -1,18 +1,45 @@
-"""Thin HTTP layer for notifications."""
+"""Thin HTTP + WebSocket layer for notifications."""
 
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+import jwt
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Principal, get_current_principal, get_session
 from app.core.schemas import Page, PageParams
+from app.core.security import decode_token
 from app.domains.notifications import service
 from app.domains.notifications.schemas import MarkAllReadResult, NotificationRead
+from app.domains.notifications.ws import manager
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+@router.websocket("/ws")
+async def notifications_ws(websocket: WebSocket, token: str = Query(...)) -> None:
+    """Authenticated real-time channel. The access token is passed as a query
+    param (browsers can't set headers on a WebSocket handshake). Pushes a
+    ``{type: "notification", ...}`` frame whenever a notification is created."""
+    try:
+        payload = decode_token(token, expected_type="access")
+        user_id = payload["sub"]
+    except (jwt.PyJWTError, KeyError):
+        await websocket.close(code=4401)
+        return
+
+    await manager.connect(user_id, websocket)
+    try:
+        await websocket.send_json({"type": "connected"})
+        while True:
+            # We don't expect client messages; receiving lets us detect close.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(user_id, websocket)
+    except Exception:  # pragma: no cover - defensive
+        await manager.disconnect(user_id, websocket)
 
 
 @router.get("", response_model=Page[NotificationRead])

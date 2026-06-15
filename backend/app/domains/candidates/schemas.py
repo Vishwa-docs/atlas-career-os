@@ -147,29 +147,53 @@ class CandidateMe(BaseModel):
     completeness: int = 0
 
 
-class DashboardStats(BaseModel):
-    applications: int = 0
-    matches: int = 0
-    profile_completeness: int = 0
-    market_percentile: int | None = None
+class DashboardStat(BaseModel):
+    """One headline metric tile on the candidate dashboard."""
+
+    label: str
+    value: str | int | float
+    hint: str | None = None
+    # default | brand | success | warning
+    tone: str | None = None
+
+
+class RecentMatch(BaseModel):
+    """A top open-role match surfaced on the dashboard (cheap pgvector rank)."""
+
+    job_id: str
+    title: str
+    company: str
+    location: str | None = None
+    score: float = Field(ge=0.0, le=1.0)
 
 
 class Nudge(BaseModel):
+    """A coach nudge card. ``id`` keys the list; ``tone`` styles the card."""
+
+    id: str
     title: str
     body: str
-    type: str = "tip"
+    # info | success | warning
+    tone: str | None = None
+    cta_label: str | None = None
+    cta_to: str | None = None
 
 
 class MarketSnapshot(BaseModel):
-    median_salary_myr: int | None = None
-    demand_note: str = ""
+    """Hero market summary derived from the target occupation (no LLM)."""
+
+    # sunny | cloudy | stormy
+    outlook: str | None = None
+    demand_index: float | None = None
+    salary_drift_pct: float | None = None
+    summary: str | None = None
 
 
 class CandidateDashboard(BaseModel):
-    stats: DashboardStats
-    recent_matches: list[dict] = Field(default_factory=list)
+    stats: list[DashboardStat] = Field(default_factory=list)
+    recent_matches: list[RecentMatch] = Field(default_factory=list)
     nudges: list[Nudge] = Field(default_factory=list)
-    market_snapshot: MarketSnapshot
+    market_snapshot: MarketSnapshot | None = None
 
 
 # --------------------------------------------------------------------------- #

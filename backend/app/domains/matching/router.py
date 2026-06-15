@@ -107,14 +107,25 @@ async def candidate_matches_for_job(
     )
     await session.commit()
 
+    names = await repo.candidate_names([c.id for c, _g, _r in matched])
+
     out: list[CandidateMatch] = []
     for candidate, has_grant, result in matched:
         top_skills = await repo.candidate_skill_names(candidate.id)
+        consent_note = (
+            "Shown under this candidate's active consent grant. Contact details "
+            "unlock only with their explicit opt-in."
+            if has_grant
+            else "Discoverable because this candidate is open to work. "
+            "Request consent to view their full Career Graph."
+        )
         out.append(
             CandidateMatch(
                 candidate_summary=CandidateSummary(
                     id=str(candidate.id),
+                    full_name=names.get(candidate.id) or "Candidate",
                     headline=candidate.headline,
+                    current_role=candidate.headline,
                     location=candidate.location,
                     years_experience=candidate.years_experience,
                     open_to_work=candidate.open_to_work,
@@ -124,6 +135,7 @@ async def candidate_matches_for_job(
                 score=result["score"],
                 sub_scores=SubScores(**result["sub_scores"]),
                 glass_box=result["glass_box"],
+                consent_note=consent_note,
             )
         )
     return out

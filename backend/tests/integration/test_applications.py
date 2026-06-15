@@ -38,19 +38,21 @@ async def test_apply_pipeline_and_status_transition(client) -> None:
     assert application["candidate_id"] == cand_id
     assert application["status"] == "applied"
 
-    # Candidate sees it in their own list with the job summary.
+    # Candidate sees it in their own (flat) list with the job title.
     mine = await client.get(f"{API}/applications", headers=candidate.headers)
     assert mine.status_code == 200, mine.text
     rows = mine.json()
-    assert any(r["application"]["id"] == application["id"] for r in rows)
+    assert any(r["id"] == application["id"] for r in rows)
+    assert any(r["job_id"] == job["id"] for r in rows)
 
-    # Employer sees it in the job pipeline.
+    # Employer sees it in the (flat) job pipeline.
     pipeline = await client.get(
         f"{API}/jobs/{job['id']}/applications", headers=employer.headers
     )
     assert pipeline.status_code == 200, pipeline.text
     entries = pipeline.json()
-    assert any(e["application"]["id"] == application["id"] for e in entries)
+    assert any(e["id"] == application["id"] for e in entries)
+    assert all("candidate_name" in e and "status" in e for e in entries)
 
     # Employer advances the application to 'shortlisted'.
     patched = await client.patch(

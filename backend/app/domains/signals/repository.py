@@ -8,7 +8,9 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.candidates.models import CandidateProfile
 from app.domains.signals.models import Signal
+from app.domains.users.models import User
 
 
 async def add(
@@ -64,3 +66,18 @@ async def get_for_org(
     return await session.scalar(
         select(Signal).where(Signal.id == signal_id, Signal.org_id == org_id)
     )
+
+
+async def subject_names(
+    session: AsyncSession, candidate_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Map candidate-profile id → subject's full name (one batched query)."""
+    if not candidate_ids:
+        return {}
+    stmt = (
+        select(CandidateProfile.id, User.full_name)
+        .join(User, User.id == CandidateProfile.user_id)
+        .where(CandidateProfile.id.in_(candidate_ids))
+    )
+    rows = (await session.execute(stmt)).all()
+    return {cid: name for cid, name in rows if name}

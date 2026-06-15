@@ -31,28 +31,28 @@ export const ADMIN_PAGE_SIZE = 20;
  * Overview — GET /admin/metrics
  * ------------------------------------------------------------------------- */
 
-export interface AdminTrendPoint {
-  date: string;
-  value: number;
-}
-
 export interface AdminBreakdown {
   label: string;
   value: number;
 }
 
+/**
+ * Mirrors backend `PlatformMetrics` (admin/schemas.py) exactly — the canonical
+ * `GET /admin/metrics` response. Numeric KPIs always present (default 0 on the
+ * server); the two breakdowns are always-present arrays of `{label, value}`.
+ */
 export interface AdminMetrics {
   total_users: number;
-  active_users_30d?: number;
   total_orgs: number;
-  total_jobs?: number;
-  total_applications?: number;
-  total_matches?: number;
-  ai_calls_30d?: number;
-  ai_cost_usd_30d?: number;
-  new_users_trend?: AdminTrendPoint[];
-  signups_by_role?: AdminBreakdown[];
-  orgs_by_type?: AdminBreakdown[];
+  total_jobs: number;
+  total_applications: number;
+  ai_calls_30d: number;
+  ai_cost_usd_30d: number;
+  candidates: number;
+  employers: number;
+  universities: number;
+  signups_by_role: AdminBreakdown[];
+  orgs_by_type: AdminBreakdown[];
 }
 
 export function useAdminMetrics() {

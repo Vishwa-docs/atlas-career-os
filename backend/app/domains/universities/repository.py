@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.candidates.models import CandidateProfile, CandidateSkill, CareerEvent
+from app.domains.credentials.models import Credential
 from app.domains.taxonomy.models import Skill
 from app.domains.universities.models import (
     Cohort,
@@ -20,6 +21,7 @@ from app.domains.universities.models import (
     Internship,
     Outcome,
 )
+from app.domains.users.models import User
 
 
 class UniversityRepository:
@@ -72,33 +74,67 @@ class UniversityRepository:
         )
         return int((await self.session.execute(stmt)).scalar_one() or 0)
 
+    async def active_students(self, org_id: uuid.UUID) -> int:
+        """Distinct students enrolled across the org's cohorts."""
+        stmt = (
+            select(func.count(func.distinct(CohortStudent.candidate_id)))
+            .join(Cohort, Cohort.id == CohortStudent.cohort_id)
+            .where(Cohort.university_org_id == org_id)
+        )
+        return int((await self.session.execute(stmt)).scalar_one() or 0)
+
+    async def program_count(self, org_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.count(func.distinct(Cohort.program)))
+            .where(Cohort.university_org_id == org_id)
+        )
+        return int((await self.session.execute(stmt)).scalar_one() or 0)
+
+    async def open_internship_count(self, org_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Internship)
+            .where(Internship.org_id == org_id, Internship.status == "open")
+        )
+        return int((await self.session.execute(stmt)).scalar_one() or 0)
+
+    async def credentials_issued(self, org_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Credential)
+            .where(Credential.issuer_org_id == org_id)
+        )
+        return int((await self.session.execute(stmt)).scalar_one() or 0)
+
     # ----------------------------- students --------------------------- #
     async def roster(
         self, org_id: uuid.UUID, limit: int = 200
-    ) -> list[tuple[CohortStudent, Cohort, CandidateProfile]]:
+    ) -> list[tuple[CohortStudent, Cohort, CandidateProfile, str | None]]:
         stmt = (
-            select(CohortStudent, Cohort, CandidateProfile)
+            select(CohortStudent, Cohort, CandidateProfile, User.full_name)
             .join(Cohort, Cohort.id == CohortStudent.cohort_id)
             .join(
                 CandidateProfile,
                 CandidateProfile.id == CohortStudent.candidate_id,
             )
+            .join(User, User.id == CandidateProfile.user_id, isouter=True)
             .where(Cohort.university_org_id == org_id)
             .limit(limit)
         )
-        return [(s, c, p) for s, c, p in (await self.session.execute(stmt)).all()]
+        return [(s, c, p, n) for s, c, p, n in (await self.session.execute(stmt)).all()]
 
     async def student_in_org(
         self, org_id: uuid.UUID, candidate_id: uuid.UUID
-    ) -> tuple[CohortStudent, Cohort, CandidateProfile] | None:
+    ) -> tuple[CohortStudent, Cohort, CandidateProfile, str | None] | None:
         """Resolve a single roster row, enforcing org membership (BOLA)."""
         stmt = (
-            select(CohortStudent, Cohort, CandidateProfile)
+            select(CohortStudent, Cohort, CandidateProfile, User.full_name)
             .join(Cohort, Cohort.id == CohortStudent.cohort_id)
             .join(
                 CandidateProfile,
                 CandidateProfile.id == CohortStudent.candidate_id,
             )
+            .join(User, User.id == CandidateProfile.user_id, isouter=True)
             .where(
                 Cohort.university_org_id == org_id,
                 CohortStudent.candidate_id == candidate_id,
@@ -106,7 +142,7 @@ class UniversityRepository:
             .limit(1)
         )
         row = (await self.session.execute(stmt)).first()
-        return (row[0], row[1], row[2]) if row else None
+        return (row[0], row[1], row[2], row[3]) if row else None
 
     # --------------------- candidate enrichment ----------------------- #
     async def candidate_skills(self, candidate_id: uuid.UUID) -> list[tuple[CandidateSkill, Skill]]:

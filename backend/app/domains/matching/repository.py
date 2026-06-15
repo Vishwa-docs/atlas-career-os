@@ -21,6 +21,7 @@ from app.domains.consent.models import ConsentGrant
 from app.domains.jobs.models import Job
 from app.domains.matching.models import MatchResult
 from app.domains.taxonomy.models import OccupationTransition, Skill
+from app.domains.users.models import User
 
 
 class MatchingRepository:
@@ -38,6 +39,20 @@ class MatchingRepository:
     async def get_candidate_by_user(self, user_id: uuid.UUID) -> CandidateProfile | None:
         stmt = select(CandidateProfile).where(CandidateProfile.user_id == user_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def candidate_names(
+        self, candidate_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str]:
+        """Map candidate-profile id → user's full name (one batched query)."""
+        if not candidate_ids:
+            return {}
+        stmt = (
+            select(CandidateProfile.id, User.full_name)
+            .join(User, User.id == CandidateProfile.user_id)
+            .where(CandidateProfile.id.in_(candidate_ids))
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {cid: name for cid, name in rows if name}
 
     async def candidate_skill_names(self, candidate_id: uuid.UUID) -> list[str]:
         """Return the candidate's skill names (lower-cased) via the join table."""

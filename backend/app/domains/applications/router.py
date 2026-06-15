@@ -12,9 +12,9 @@ from app.core.roles import Role
 from app.domains.applications import service
 from app.domains.applications.schemas import (
     ApplicationCreate,
-    ApplicationDetail,
     ApplicationRead,
     ApplicationStatusUpdate,
+    CandidateApplicationRow,
 )
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -33,12 +33,12 @@ async def apply(
     return await service.apply(session, principal, payload)
 
 
-@router.get("", response_model=list[ApplicationDetail])
+@router.get("", response_model=list[CandidateApplicationRow])
 async def list_my_applications(
     principal: Principal = Depends(_CANDIDATE),
     session: AsyncSession = Depends(get_session),
-) -> list[ApplicationDetail]:
-    """The calling candidate's applications with job + status timeline."""
+) -> list[CandidateApplicationRow]:
+    """The calling candidate's applications as flat cards with a status timeline."""
     return await service.list_my_applications(session, principal)
 
 

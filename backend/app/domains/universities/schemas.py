@@ -18,28 +18,37 @@ from app.domains.ai.schemas import GlassBox
 # --------------------------------------------------------------------------- #
 
 
+class TrendPoint(BaseModel):
+    year: int
+    employment_rate: float
+    median_salary: int | None = None
+
+
 class UniversityDashboard(BaseModel):
-    cohorts: int = 0
-    tracked_graduates: int = 0
     employment_rate: float = 0.0
     median_salary: int | None = None
     median_months_to_employ: float | None = None
+    active_students: int = 0
+    graduates_tracked: int = 0
+    programs: int = 0
+    internships_open: int = 0
+    credentials_issued: int = 0
+    currency: str = "MYR"
+    trend: list[TrendPoint] = Field(default_factory=list)
 
 
 class FieldRate(BaseModel):
     field: str
-    rate: float
-
-
-class TrendPoint(BaseModel):
-    year: int
-    rate: float
+    employment_rate: float
+    median_salary: int | None = None
+    graduates: int | None = None
 
 
 class OutcomesReport(BaseModel):
     employment_rate: float = 0.0
     median_salary: int | None = None
     median_months_to_employ: float | None = None
+    currency: str = "MYR"
     by_field: list[FieldRate] = Field(default_factory=list)
     trend: list[TrendPoint] = Field(default_factory=list)
 
@@ -50,12 +59,14 @@ class OutcomesReport(BaseModel):
 
 
 class StudentRosterEntry(BaseModel):
-    candidate_id: str
-    cohort_id: str | None = None
+    id: str
+    full_name: str
     student_ref: str | None = None
     headline: str | None = None
     program: str | None = None
-    graduation_year: int | None = None
+    field: str | None = None
+    year: int | None = None
+    cohort: str | None = None
     readiness_score: float = Field(ge=0.0, le=1.0)
 
 
@@ -66,11 +77,14 @@ class StudentRoster(BaseModel):
 class ReadinessDimension(BaseModel):
     name: str
     score: float = Field(ge=0.0, le=1.0)
-    note: str
+    benchmark: float | None = None
+    detail: str | None = None
 
 
 class ReadinessProfile(BaseModel):
     candidate_id: str | None = None
+    student_name: str | None = None
+    program: str | None = None
     score: float = Field(ge=0.0, le=1.0)
     dimensions: list[ReadinessDimension] = Field(default_factory=list)
     glass_box: GlassBox
@@ -84,13 +98,21 @@ class ReadinessProfile(BaseModel):
 class MarketSkill(BaseModel):
     skill: str
     demand: float
+    coverage: float = 0.0
+
+
+class CurriculumGap(BaseModel):
+    skill: str
+    demand: float | None = None
+    severity: str | None = None  # low | medium | high
+    recommendation: str | None = None
 
 
 class CurriculumReport(BaseModel):
     program: str
     market_skills: list[MarketSkill] = Field(default_factory=list)
     covered: list[str] = Field(default_factory=list)
-    gaps: list[str] = Field(default_factory=list)
+    gaps: list[CurriculumGap] = Field(default_factory=list)
     glass_box: GlassBox
 
 

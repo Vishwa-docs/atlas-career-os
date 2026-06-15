@@ -102,3 +102,27 @@
     @apply bg-card/70 backdrop-blur-xl;
   }
 }
+
+/* Print: isolate the CV surface (data-cv-print) so "Save as PDF" yields a clean,
+   chrome-free résumé regardless of the surrounding app shell. */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  [data-cv-print],
+  [data-cv-print] * {
+    visibility: visible !important;
+  }
+  [data-cv-print] {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    border: 0;
+    box-shadow: none;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

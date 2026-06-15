@@ -17,6 +17,7 @@ from app.core.schemas import Page
 from app.domains.notifications import repository as repo
 from app.domains.notifications.models import Notification
 from app.domains.notifications.schemas import MarkAllReadResult, NotificationRead
+from app.domains.notifications.ws import publish_notification
 
 
 async def create_notification(
@@ -32,8 +33,10 @@ async def create_notification(
     """Create an in-app notification for a user. Flushes, does not commit.
 
     Exported for cross-domain use; callers own the surrounding transaction.
+    Also pushes a best-effort real-time frame to any open WebSocket; the client
+    treats it as a hint and refetches the authoritative list over REST.
     """
-    return await repo.add(
+    notif = await repo.add(
         session,
         user_id=uuid.UUID(str(user_id)),
         type=type,
@@ -42,6 +45,11 @@ async def create_notification(
         link=link,
         payload=payload,
     )
+    await publish_notification(
+        str(user_id),
+        {"id": str(notif.id), "title": title, "body": body, "link": link, "kind": type},
+    )
+    return notif
 
 
 async def list_notifications(

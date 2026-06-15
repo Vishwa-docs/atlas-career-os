@@ -89,5 +89,40 @@ class PipelineEntry(BaseModel):
     events: list[ApplicationEventRead] = Field(default_factory=list)
 
 
+class ApplicationEventFlat(BaseModel):
+    """A flattened timeline event for the candidate applications view."""
+
+    status: str
+    at: datetime
+    note: str | None = None
+
+
+class CandidateApplicationRow(BaseModel):
+    """Flat application card for the candidate's own pipeline view."""
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    job_title: str
+    company: str | None = None
+    org_name: str | None = None
+    location: str | None = None
+    status: str
+    created_at: datetime
+    timeline: list[ApplicationEventFlat] = Field(default_factory=list)
+
+
+class PipelineApplication(BaseModel):
+    """Flat applicant card for an employer's per-job kanban pipeline."""
+
+    id: uuid.UUID
+    candidate_id: uuid.UUID
+    candidate_name: str
+    headline: str | None = None
+    status: str
+    match_score: float | None = None
+    applied_at: datetime | None = None
+    avatar_url: str | None = None
+
+
 # Re-exported so routers/services can validate against the canonical set.
 VALID_STATUSES = set(APPLICATION_STATUSES)

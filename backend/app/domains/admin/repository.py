@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.admin.models import AuditLog
 from app.domains.ai.models import LlmUsage
-from app.domains.organizations.models import Organization
+from app.domains.organizations.models import Membership, Organization
 from app.domains.users.models import User
 
 # --- Optional cross-domain models (degrade gracefully if absent) ---
@@ -75,6 +75,28 @@ class AdminRepository:
         result = await self.session.execute(select(func.coalesce(func.sum(LlmUsage.cost_usd), 0.0)))
         return float(result.scalar_one() or 0.0)
 
+    async def count_total_orgs(self) -> int:
+        return await self._count(Organization)
+
+    async def count_ai_calls(self) -> int:
+        return await self._count(LlmUsage)
+
+    async def signups_by_role(self) -> list[tuple[str, int]]:
+        """Count users by their (first) role — drives the Overview breakdown."""
+        role = func.coalesce(User.roles[1], "unknown")  # Postgres arrays are 1-indexed.
+        result = await self.session.execute(
+            select(role, func.count()).group_by(role).order_by(func.count().desc())
+        )
+        return [(str(r), int(n or 0)) for r, n in result.all()]
+
+    async def orgs_by_type(self) -> list[tuple[str, int]]:
+        result = await self.session.execute(
+            select(Organization.type, func.count())
+            .group_by(Organization.type)
+            .order_by(func.count().desc())
+        )
+        return [(str(t), int(n or 0)) for t, n in result.all()]
+
     # --- Taxonomy counts ---
     async def count_skills(self) -> int:
         return await self._count(Skill)
@@ -106,16 +128,51 @@ class AdminRepository:
         )
         return list(rows.scalars().all()), total
 
+    async def org_names_for_users(self, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Map user id → their (first) organization name, if any."""
+        if not user_ids:
+            return {}
+        rows = await self.session.execute(
+            select(Membership.user_id, Organization.name)
+            .join(Organization, Organization.id == Membership.org_id)
+            .where(Membership.user_id.in_(user_ids))
+        )
+        out: dict[uuid.UUID, str] = {}
+        for uid, name in rows.all():
+            out.setdefault(uid, name)
+        return out
+
+    async def actor_identities(
+        self, actor_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[str, str]]:
+        """Map actor id → (full_name, email) for audit-log enrichment."""
+        if not actor_ids:
+            return {}
+        rows = await self.session.execute(
+            select(User.id, User.full_name, User.email).where(User.id.in_(actor_ids))
+        )
+        return {uid: (name, email) for uid, name, email in rows.all()}
+
     # --- AI usage rollups ---
-    async def usage_totals(self) -> tuple[float, int]:
+    async def usage_totals(self) -> tuple[float, int, int, int, int]:
+        """Return (cost, total_tokens, prompt_tokens, completion_tokens, calls)."""
         result = await self.session.execute(
             select(
                 func.coalesce(func.sum(LlmUsage.cost_usd), 0.0),
                 func.coalesce(func.sum(LlmUsage.prompt_tokens + LlmUsage.completion_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+                func.count(),
             )
         )
-        cost, tokens = result.one()
-        return float(cost or 0.0), int(tokens or 0)
+        cost, tokens, prompt, completion, calls = result.one()
+        return (
+            float(cost or 0.0),
+            int(tokens or 0),
+            int(prompt or 0),
+            int(completion or 0),
+            int(calls or 0),
+        )
 
     async def usage_by_feature(self) -> list[tuple[str, float, int]]:
         result = await self.session.execute(

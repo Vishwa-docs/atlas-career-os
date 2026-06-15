@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPercent, initials } from "@/lib/utils";
@@ -36,14 +36,25 @@ export default function Students() {
   const [q, setQ] = useState("");
   const [program, setProgram] = useState("");
 
-  const { data, isLoading, isFetching, isError } = useStudents({ q, program });
-  const students = useMemo(() => asArray<UniversityStudent>(data), [data]);
+  const { data, isLoading, isFetching, isError } = useStudents();
+  const allStudents = useMemo(() => asArray<UniversityStudent>(data), [data]);
 
   const programs = useMemo(() => {
     const set = new Set<string>();
-    for (const s of students) if (s.program) set.add(s.program);
+    for (const s of allStudents) if (s.program) set.add(s.program);
     return Array.from(set).sort();
-  }, [students]);
+  }, [allStudents]);
+
+  // The backend roster endpoint takes no query params, so filter client-side.
+  const students = useMemo(() => {
+    const needle = q.toLowerCase();
+    return allStudents.filter((s) => {
+      if (program && s.program !== program) return false;
+      if (!needle) return true;
+      return [s.full_name, s.program, s.field]
+        .some((v) => v?.toLowerCase().includes(needle));
+    });
+  }, [allStudents, q, program]);
 
   function onSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -139,7 +150,6 @@ export default function Students() {
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-8 w-8">
-                          {s.avatar_url && <AvatarImage src={s.avatar_url} alt={s.full_name} />}
                           <AvatarFallback className="text-xs">{initials(s.full_name)}</AvatarFallback>
                         </Avatar>
                         <div className="min-w-0">

@@ -7,10 +7,10 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import Principal, get_session, require_roles
+from app.core.deps import Principal, get_current_principal, get_session, require_roles
 from app.core.roles import Role
 from app.core.schemas import Page, PageParams
-from app.domains.applications.schemas import PipelineEntry
+from app.domains.applications.schemas import PipelineApplication
 from app.domains.jobs import service
 from app.domains.jobs.schemas import (
     JobCreate,
@@ -32,10 +32,12 @@ async def search_jobs(
     seniority: str | None = Query(default=None),
     work_mode: str | None = Query(default=None),
     semantic: bool = Query(default=False),
+    mine: bool = Query(default=False, description="Restrict to the caller's org's jobs."),
     page: PageParams = Depends(),
+    principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
 ) -> Page[JobRead]:
-    """Search open jobs (keyword+facets, or hybrid vector+keyword RRF)."""
+    """Search jobs. ``mine=true`` scopes to the caller's organization (all statuses)."""
     return await service.search_jobs(
         session,
         q=q,
@@ -43,6 +45,7 @@ async def search_jobs(
         seniority=seniority,
         work_mode=work_mode,
         semantic=semantic,
+        mine_org_id=principal.org_id if mine else None,
         page=page,
     )
 
@@ -107,11 +110,11 @@ async def debias_job(
     return await service.debias_job(session, principal, job_id)
 
 
-@router.get("/{job_id}/applications", response_model=list[PipelineEntry])
+@router.get("/{job_id}/applications", response_model=list[PipelineApplication])
 async def job_pipeline(
     job_id: uuid.UUID,
     principal: Principal = Depends(_EMPLOYER),
     session: AsyncSession = Depends(get_session),
-) -> list[PipelineEntry]:
-    """Application pipeline for a job (same-org employers only)."""
+) -> list[PipelineApplication]:
+    """Flat application pipeline for a job (same-org employers only)."""
     return await service.job_pipeline(session, principal, job_id)

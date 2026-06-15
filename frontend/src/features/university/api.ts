@@ -12,8 +12,8 @@ import type { GlassBox, Paginated } from "@/types/api";
  * Shared helpers
  * ------------------------------------------------------------------------- */
 
-/** Tolerate either a Paginated<T> envelope or a bare array from the API. */
-export function asArray<T>(data: Paginated<T> | T[] | undefined): T[] {
+/** Tolerate an `{ items }` envelope (Paginated or bare roster) or a plain array. */
+export function asArray<T>(data: { items?: T[] } | T[] | undefined): T[] {
   if (!data) return [];
   return Array.isArray(data) ? data : data.items ?? [];
 }
@@ -92,27 +92,28 @@ export function useOutcomes(params?: { cohort?: string; year?: number }) {
  * Students — GET /universities/students
  * ------------------------------------------------------------------------- */
 
+/** Mirrors backend `StudentRosterEntry`. `readiness_score` is always present (0..1). */
 export interface UniversityStudent {
   id: string;
   full_name: string;
-  program?: string;
-  field?: string;
-  year?: number | string;
-  cohort?: string;
-  readiness_score?: number;
-  status?: string;
-  email?: string;
-  avatar_url?: string | null;
+  student_ref?: string | null;
+  headline?: string | null;
+  program?: string | null;
+  field?: string | null;
+  year?: number | null;
+  cohort?: string | null;
+  readiness_score: number;
 }
 
-export function useStudents(params?: { q?: string; program?: string }) {
+/** Backend `StudentRoster` — a bare `{ items }` envelope (no pagination fields). */
+export interface StudentRoster {
+  items: UniversityStudent[];
+}
+
+export function useStudents() {
   return useQuery({
-    queryKey: ["university", "students", params ?? {}],
-    queryFn: () =>
-      api.get<Paginated<UniversityStudent> | UniversityStudent[]>("/universities/students", {
-        q: params?.q || undefined,
-        program: params?.program || undefined,
-      }),
+    queryKey: ["university", "students"],
+    queryFn: () => api.get<StudentRoster>("/universities/students"),
   });
 }
 

@@ -19,11 +19,10 @@ from app.domains.applications.models import Application, ApplicationEvent
 from app.domains.applications.schemas import (
     VALID_STATUSES,
     ApplicationCreate,
-    ApplicationDetail,
-    ApplicationEventRead,
+    ApplicationEventFlat,
     ApplicationRead,
     ApplicationStatusUpdate,
-    JobSummary,
+    CandidateApplicationRow,
 )
 
 
@@ -81,16 +80,35 @@ async def _notify(
         pass
 
 
-def _job_summary(job) -> JobSummary:
-    return JobSummary(
-        id=job.id,
-        title=job.title,
-        location=job.location,
-        work_mode=job.work_mode,
-        seniority=job.seniority,
-        status=job.status,
-        org_id=job.org_id,
+async def _org_names(session: AsyncSession, org_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Map org id → name (best-effort, one batched query)."""
+    if not org_ids:
+        return {}
+    from app.domains.organizations.models import Organization
+
+    rows = await session.execute(
+        select(Organization.id, Organization.name).where(Organization.id.in_(org_ids))
     )
+    return dict(rows.all())
+
+
+async def _candidate_names(
+    session: AsyncSession, candidate_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Map candidate-profile id → owner's full name (best-effort, one query)."""
+    if not candidate_ids:
+        return {}
+    try:
+        from app.domains.candidates.models import CandidateProfile
+        from app.domains.users.models import User
+    except ImportError:  # pragma: no cover
+        return {}
+    rows = await session.execute(
+        select(CandidateProfile.id, User.full_name)
+        .join(User, User.id == CandidateProfile.user_id)
+        .where(CandidateProfile.id.in_(candidate_ids))
+    )
+    return {cid: name for cid, name in rows.all() if name}
 
 
 # --------------------------------------------------------------------------- #
@@ -146,8 +164,8 @@ async def apply(
 # --------------------------------------------------------------------------- #
 async def list_my_applications(
     session: AsyncSession, principal: Principal
-) -> list[ApplicationDetail]:
-    """List the calling candidate's applications, enriched with job + timeline."""
+) -> list[CandidateApplicationRow]:
+    """List the calling candidate's applications as flat cards (job + timeline)."""
     profile = await _candidate_profile_for_user(session, principal.user_id)
     applications = await repo.list_for_candidate(session, profile.id)
     events_map = await repo.events_for_many(session, [a.id for a in applications])
@@ -155,21 +173,32 @@ async def list_my_applications(
     from app.domains.jobs import repository as jobs_repo
 
     jobs_map = await jobs_repo.fetch_jobs_by_ids(session, [a.job_id for a in applications])
+    org_names = await _org_names(
+        session, [j.org_id for j in jobs_map.values()]
+    )
 
-    details: list[ApplicationDetail] = []
+    rows: list[CandidateApplicationRow] = []
     for application in applications:
         job = jobs_map.get(application.job_id)
-        details.append(
-            ApplicationDetail(
-                application=ApplicationRead.model_validate(application),
-                job=_job_summary(job) if job is not None else None,
-                events=[
-                    ApplicationEventRead.model_validate(e)
-                    for e in events_map.get(application.id, [])
-                ],
+        org_name = org_names.get(job.org_id) if job is not None else None
+        timeline = [
+            ApplicationEventFlat(status=e.to_status, at=e.created_at, note=e.note)
+            for e in events_map.get(application.id, [])
+        ]
+        rows.append(
+            CandidateApplicationRow(
+                id=application.id,
+                job_id=application.job_id,
+                job_title=job.title if job is not None else "Role",
+                company=org_name,
+                org_name=org_name,
+                location=job.location if job is not None else None,
+                status=application.status,
+                created_at=application.created_at,
+                timeline=timeline,
             )
         )
-    return details
+    return rows
 
 
 # --------------------------------------------------------------------------- #

@@ -23,7 +23,7 @@ from app.domains.employers.schemas import (
     EmployerDashboard,
     OnboardingReport,
     OnboardingRisk,
-    PipelineBreakdown,
+    PipelineStage,
     RecentActivity,
     ReengagementCandidate,
     ReengagementReport,
@@ -31,6 +31,16 @@ from app.domains.employers.schemas import (
     WorkforceReport,
     WorkforceScenario,
     WorkforceScenarios,
+)
+
+# Canonical hiring-funnel order; only stages with a count are surfaced.
+_PIPELINE_ORDER = (
+    "applied",
+    "screening",
+    "shortlisted",
+    "interview",
+    "offer",
+    "hired",
 )
 
 try:  # usage ledger is optional cross-domain plumbing
@@ -68,23 +78,34 @@ class EmployerService:
         ttf = await self.repo.avg_time_to_fill_days(org_id)
         flight = await self.repo.flight_risk_count(org_id)
 
+        # Ordered funnel: canonical stages first (with data), then any extras.
+        pipeline = [
+            PipelineStage(stage=stage, count=by_stage[stage])
+            for stage in _PIPELINE_ORDER
+            if by_stage.get(stage)
+        ]
+        for stage, count in sorted(by_stage.items()):
+            if stage not in _PIPELINE_ORDER and count:
+                pipeline.append(PipelineStage(stage=stage, count=count))
+
         recent: list[RecentActivity] = []
         for app_row, job in await self.repo.recent_applications(org_id):
             recent.append(
                 RecentActivity(
+                    id=str(app_row.id),
                     kind="application",
-                    summary=f"Applicant in '{job.title}' is now {app_row.status}.",
+                    title=f"Applicant in '{job.title}' is now {app_row.status}.",
                     at=app_row.updated_at.isoformat() if app_row.updated_at else None,
-                    ref_id=str(app_row.id),
                 )
             )
 
         return EmployerDashboard(
             open_roles=open_roles,
-            total_applicants=total,
-            pipeline=PipelineBreakdown(by_stage=by_stage),
-            time_to_fill_days=ttf,
+            pipeline=pipeline,
+            time_to_fill=ttf,
             flight_risk_count=flight,
+            applications_total=total,
+            offers_out=int(by_stage.get("offer", 0)),
             recent_activity=recent,
         )
 
@@ -94,15 +115,16 @@ class EmployerService:
     async def onboarding(self, org_id: uuid.UUID) -> OnboardingReport:
         rows = await self.repo.applications_by_status(org_id, ("hired",))
         items: list[OnboardingRisk] = []
-        for app_row, job, profile in rows:
+        for app_row, job, profile, full_name in rows:
             risk, gb = await self._onboarding_risk(org_id, app_row, job, profile)
-            summary = profile.headline or "Recent hire"
+            risk_level = "high" if risk >= 0.6 else "medium" if risk >= 0.35 else "low"
             items.append(
                 OnboardingRisk(
-                    candidate_id=str(profile.id),
-                    application_id=str(app_row.id),
-                    candidate_summary=summary,
-                    role_title=job.title,
+                    id=str(profile.id),
+                    full_name=full_name or "New hire",
+                    headline=profile.headline,
+                    role=job.title,
+                    risk_level=risk_level,
                     risk_score=risk,
                     glass_box=gb,
                 )
@@ -165,7 +187,7 @@ class EmployerService:
         rows = await self.repo.applications_by_status(org_id, ("rejected", "withdrawn"))
         open_jobs = await self.repo.open_roles(org_id)
         items: list[ReengagementCandidate] = []
-        for app_row, _job, profile in rows:
+        for app_row, _job, profile, full_name in rows:
             suggested = open_jobs[0] if open_jobs else None
             gb = GlassBox(
                 rationale=(
@@ -188,13 +210,18 @@ class EmployerService:
                 ],
                 caveats=["Re-contact only with the candidate's standing consent."],
             )
+            reason = (
+                f"Reached '{app_row.status}' previously and fits "
+                f"{suggested.title if suggested else 'a current open role'}."
+            )
             items.append(
                 ReengagementCandidate(
-                    candidate_id=str(profile.id),
-                    application_id=str(app_row.id),
-                    candidate_summary=profile.headline or "Previous strong applicant",
-                    previous_status=app_row.status,
-                    suggested_role=suggested.title if suggested else "Open role (TBD)",
+                    id=str(profile.id),
+                    full_name=full_name or "Previous applicant",
+                    headline=profile.headline,
+                    former_role=profile.headline,
+                    reason=reason,
+                    fit_score=round(gb.confidence_score, 2),
                     suggested_job_id=str(suggested.id) if suggested else None,
                     glass_box=gb,
                 )
@@ -210,7 +237,7 @@ class EmployerService:
         projections = [
             WorkforceProjection(
                 year=y,
-                working_age_index=series[y],
+                working_age=series[y],
                 # Supply index reflects working-age pool minus assumed 4%/5yr
                 # competitive draw; bounded, illustrative.
                 supply_index=round(series[y] * 0.96, 1),
@@ -227,7 +254,7 @@ class EmployerService:
         self, country: str, projections: list[WorkforceProjection], org_id, user_id
     ) -> tuple[list[WorkforceScenario], GlassBox]:
         series_text = ", ".join(
-            f"{p.year}: working-age index {p.working_age_index}" for p in projections
+            f"{p.year}: working-age index {p.working_age}" for p in projections
         )
         citation = Citation(
             label="UN World Population Prospects 2024 — working-age population",
@@ -259,7 +286,18 @@ class EmployerService:
                     org_id=org_id,
                     user_id=user_id,
                 )
-            scenarios = result.scenarios or _fallback_scenarios(country)
+            scenarios = (
+                [
+                    WorkforceScenario(
+                        id=f"scenario-{i + 1}",
+                        title=s.title,
+                        description=s.description,
+                    )
+                    for i, s in enumerate(result.scenarios)
+                ]
+                if result.scenarios
+                else _fallback_scenarios(country)
+            )
             gb = result.glass_box
             # Ensure the demographic citation is always present.
             if not any(c.source_type == CitationSourceType.DEMOGRAPHIC_DATA for c in gb.citations):
@@ -291,16 +329,18 @@ def _empty_usage():
 def _fallback_scenarios(country: str) -> list[WorkforceScenario]:
     return [
         WorkforceScenario(
-            name="Tightening pool",
-            summary=(
+            id="tightening-pool",
+            title="Tightening pool",
+            description=(
                 f"If the {country} working-age pool contracts as projected, "
                 "competition for mid-career talent intensifies; invest in retention "
                 "and internal mobility now."
             ),
         ),
         WorkforceScenario(
-            name="Resilience through reskilling",
-            summary=(
+            id="resilience-reskilling",
+            title="Resilience through reskilling",
+            description=(
                 "Offsetting demographic decline by upskilling existing staff and "
                 "widening early-career intake keeps supply stable."
             ),

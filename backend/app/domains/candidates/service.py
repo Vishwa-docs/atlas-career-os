@@ -27,9 +27,10 @@ from app.domains.candidates.schemas import (
     CareerEventCreate,
     CareerEventRead,
     CareerEventUpdate,
-    DashboardStats,
+    DashboardStat,
     MarketSnapshot,
     Nudge,
+    RecentMatch,
     ResumeParse,
     SkillsReplace,
 )
@@ -278,7 +279,11 @@ class CandidateService:
 
     # ----------------------------- dashboard ------------------------------ #
     async def get_dashboard(self, user_id: str) -> CandidateDashboard:
-        """Assemble the candidate home dashboard. Robust to empty/absent data."""
+        """Assemble the candidate home dashboard. Robust to empty/absent data.
+
+        Fast by design: stats and the market snapshot are pure heuristics and
+        ``recent_matches`` is a cheap pgvector cosine ranking — no LLM call.
+        """
         uid = uuid.UUID(user_id)
         profile = await self._get_or_create_profile(uid)
         n_events = await self.repo.count_career_events(profile.id)
@@ -287,20 +292,66 @@ class CandidateService:
 
         applications = await self._safe_application_count(profile.id)
         matches = await self._safe_match_count(profile.id)
+        recent_matches = await self._recent_matches(profile)
         market_snapshot, percentile = await self._safe_market(profile)
+
+        stats = [
+            DashboardStat(label="Applications", value=applications, tone="brand"),
+            DashboardStat(
+                label="Job matches",
+                value=max(matches, len(recent_matches)),
+                hint="Roles aligned to your trajectory",
+            ),
+            DashboardStat(
+                label="Profile completeness",
+                value=f"{completeness}%",
+                tone="success" if completeness >= 80 else "warning",
+            ),
+            DashboardStat(
+                label="Market percentile",
+                value=f"{percentile}%" if percentile is not None else "—",
+                hint=None if percentile is not None else "Set a target occupation",
+            ),
+        ]
 
         nudges = self._nudges(profile, n_events, n_skills, completeness)
         return CandidateDashboard(
-            stats=DashboardStats(
-                applications=applications,
-                matches=matches,
-                profile_completeness=completeness,
-                market_percentile=percentile,
-            ),
-            recent_matches=[],
+            stats=stats,
+            recent_matches=recent_matches,
             nudges=nudges,
             market_snapshot=market_snapshot,
         )
+
+    async def _recent_matches(self, profile: CandidateProfile) -> list[RecentMatch]:
+        """Top ~3 open jobs by pgvector cosine distance to the candidate. No LLM."""
+        embedding = getattr(profile, "embedding", None)
+        if embedding is None:
+            return []
+        try:
+            rows = await self.repo.top_jobs_by_embedding(embedding, limit=3)
+        except Exception:  # pragma: no cover - vector op best-effort
+            return []
+        out: list[RecentMatch] = []
+        for job, org_name in rows:
+            # cosine_distance ∈ [0, 2]; map to a 0..1 similarity score.
+            score = await self._job_similarity(profile, job)
+            out.append(
+                RecentMatch(
+                    job_id=str(job.id),
+                    title=job.title,
+                    company=org_name or "Confidential",
+                    location=job.location,
+                    score=score,
+                )
+            )
+        return out
+
+    async def _job_similarity(self, profile: CandidateProfile, job) -> float:
+        """0..1 cosine similarity between the candidate and a job embedding."""
+        from app.domains.matching.service import cosine
+
+        sim = cosine(getattr(profile, "embedding", None), getattr(job, "embedding", None))
+        return round(sim if sim is not None else 0.5, 4)
 
     def _nudges(
         self, profile: CandidateProfile, n_events: int, n_skills: int, completeness: int
@@ -309,33 +360,45 @@ class CandidateService:
         if not profile.headline or not profile.summary:
             nudges.append(
                 Nudge(
+                    id="profile",
                     title="Complete your headline",
                     body="A headline and summary help employers and the matcher understand you.",
-                    type="profile",
+                    tone="info",
+                    cta_label="Edit profile",
+                    cta_to="/app/profile",
                 )
             )
         if n_skills < 5:
             nudges.append(
                 Nudge(
+                    id="skills",
                     title="Add more skills",
                     body="List at least 5 skills so we can map you against real roles.",
-                    type="skills",
+                    tone="warning",
+                    cta_label="Add skills",
+                    cta_to="/app/profile",
                 )
             )
         if n_events == 0:
             nudges.append(
                 Nudge(
+                    id="timeline",
                     title="Map your career timeline",
                     body="Add roles, study, and projects to unlock trajectory insights.",
-                    type="timeline",
+                    tone="info",
+                    cta_label="Add timeline",
+                    cta_to="/app/profile",
                 )
             )
         if completeness >= 80 and not nudges:
             nudges.append(
                 Nudge(
+                    id="match-ready",
                     title="You're match-ready",
                     body="Your profile is strong — explore the Trajectory Atlas next.",
-                    type="tip",
+                    tone="success",
+                    cta_label="Open Atlas",
+                    cta_to="/app/atlas",
                 )
             )
         return nudges
@@ -366,28 +429,58 @@ class CandidateService:
         except Exception:  # pragma: no cover
             return 0
 
-    async def _safe_market(self, profile: CandidateProfile) -> tuple[MarketSnapshot, int | None]:
-        median: int | None = None
+    async def _safe_market(
+        self, profile: CandidateProfile
+    ) -> tuple[MarketSnapshot | None, int | None]:
+        """Derive the hero market snapshot from the target/current occupation.
+
+        outlook/demand_index/salary_drift come from the occupation's skills'
+        demand_trend; summary is anchored on the median salary. Cheap, no LLM.
+        Returns ``(snapshot, percentile)``; snapshot is ``None`` when there is no
+        occupation to anchor on so the frontend shows its empty hint.
+        """
+        occ_id = profile.target_occupation_id or profile.current_occupation_id
+        if occ_id is None:
+            return None, None
         try:
-            occ_id = profile.target_occupation_id or profile.current_occupation_id
-            if occ_id is not None:
-                from sqlalchemy import select
+            occ = await self.repo.get_occupation(occ_id)
+            trends = await self.repo.occupation_skill_demand(occ_id)
+        except Exception:  # pragma: no cover - taxonomy best-effort
+            return None, None
+        if occ is None:
+            return None, None
 
-                from app.domains.taxonomy.models import Occupation
+        median = occ.median_salary_myr
+        # Mean demand_trend ∈ roughly [-0.5, 0.8]; map to a 0..100 demand index
+        # centred on 50 with a damped slope so strong signals stay believable.
+        mean_trend = sum(trends) / len(trends) if trends else 0.0
+        demand_index = round(max(0.0, min(100.0, 50.0 + mean_trend * 50.0)), 1)
+        # Salary drift is an annualised proxy: demand intensity scaled to a
+        # realistic single-digit-ish percentage.
+        salary_drift_pct = round(mean_trend * 12.0, 1)
+        if demand_index >= 60:
+            outlook = "sunny"
+        elif demand_index >= 45:
+            outlook = "cloudy"
+        else:
+            outlook = "stormy"
 
-                occ = (
-                    await self.session.execute(select(Occupation).where(Occupation.id == occ_id))
-                ).scalar_one_or_none()
-                if occ is not None:
-                    median = occ.median_salary_myr
-        except Exception:  # pragma: no cover
-            median = None
-        note = (
-            "Median salary anchored to your target occupation (OpenDOSM)."
-            if median
-            else "Set a target occupation to see live market signals."
+        trend_word = "rising" if mean_trend > 0 else "softening" if mean_trend < 0 else "steady"
+        if median:
+            summary = (
+                f"{occ.title} pays a median ~RM{median:,}/month in Malaysia; "
+                f"skill demand is {trend_word}."
+            )
+        else:
+            summary = f"Skill demand for {occ.title} is {trend_word}."
+
+        snapshot = MarketSnapshot(
+            outlook=outlook,
+            demand_index=demand_index,
+            salary_drift_pct=salary_drift_pct,
+            summary=summary,
         )
-        return MarketSnapshot(median_salary_myr=median, demand_note=note), None
+        return snapshot, None
 
     # ------------------------- consent-gated view ------------------------- #
     async def get_public_candidate(

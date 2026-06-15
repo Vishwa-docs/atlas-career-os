@@ -1,11 +1,11 @@
 import { toast } from "sonner";
-import { Clock, Mail, UserPlus, Users } from "lucide-react";
+import { Mail, UserPlus, Users } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/common";
 import { GlassBoxPanel } from "@/components/glass-box";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPercent, initials } from "@/lib/utils";
 import { useReEngagement, asArray, type WarmBenchCandidate } from "../api";
@@ -16,9 +16,6 @@ function WarmCard({ candidate }: { candidate: WarmBenchCandidate }) {
       <CardContent className="space-y-4 p-5">
         <div className="flex items-start gap-3">
           <Avatar className="h-11 w-11">
-            {candidate.avatar_url && (
-              <AvatarImage src={candidate.avatar_url} alt={candidate.full_name} />
-            )}
             <AvatarFallback>{initials(candidate.full_name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
@@ -44,16 +41,7 @@ function WarmCard({ candidate }: { candidate: WarmBenchCandidate }) {
           </p>
         )}
 
-        {candidate.last_contact && (
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="h-3.5 w-3.5" /> Last contact{" "}
-            {new Date(candidate.last_contact).toLocaleDateString()}
-          </p>
-        )}
-
-        {candidate.glass_box && (
-          <GlassBoxPanel glassBox={candidate.glass_box} defaultOpen={false} />
-        )}
+        <GlassBoxPanel glassBox={candidate.glass_box} defaultOpen={false} />
 
         <Button
           size="sm"

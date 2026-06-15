@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from app.core.schemas import Page, PageParams
 from app.domains.admin.models import AuditLog
 from app.domains.admin.repository import AdminRepository
@@ -9,6 +11,7 @@ from app.domains.admin.schemas import (
     AdminUserRead,
     AiUsageReport,
     AuditLogRead,
+    Breakdown,
     PlatformMetrics,
     TaxonomyCounts,
     TenantRead,
@@ -25,14 +28,20 @@ class AdminService:
         self.session = repo.session
 
     async def metrics(self) -> PlatformMetrics:
+        by_role = await self.repo.signups_by_role()
+        by_type = await self.repo.orgs_by_type()
         return PlatformMetrics(
-            users=await self.repo.count_users(),
+            total_users=await self.repo.count_users(),
+            total_orgs=await self.repo.count_total_orgs(),
+            total_jobs=await self.repo.count_jobs(),
+            total_applications=await self.repo.count_applications(),
+            ai_calls_30d=await self.repo.count_ai_calls(),
+            ai_cost_usd_30d=round(await self.repo.total_llm_cost(), 6),
             candidates=await self.repo.count_candidates(),
             employers=await self.repo.count_orgs_by_type("employer"),
             universities=await self.repo.count_orgs_by_type("university"),
-            jobs=await self.repo.count_jobs(),
-            applications=await self.repo.count_applications(),
-            llm_cost_usd=round(await self.repo.total_llm_cost(), 6),
+            signups_by_role=[Breakdown(label=r, value=n) for r, n in by_role],
+            orgs_by_type=[Breakdown(label=t, value=n) for t, n in by_type],
         )
 
     async def tenants(self, params: PageParams) -> Page[TenantRead]:
@@ -46,8 +55,9 @@ class AdminService:
 
     async def users(self, params: PageParams) -> Page[AdminUserRead]:
         rows, total = await self.repo.list_users(params.offset, params.limit)
+        org_names = await self.repo.org_names_for_users([u.id for u in rows])
         return Page[AdminUserRead](
-            items=[self._user(u) for u in rows],
+            items=[self._user(u, org_names.get(u.id)) for u in rows],
             total=total,
             page=params.page,
             page_size=params.page_size,
@@ -61,16 +71,19 @@ class AdminService:
         )
 
     async def ai_usage(self) -> AiUsageReport:
-        total_cost, tokens = await self.repo.usage_totals()
+        total_cost, tokens, prompt, completion, calls = await self.repo.usage_totals()
         by_feature = await self.repo.usage_by_feature()
         by_day = await self.repo.usage_by_day()
         return AiUsageReport(
             total_cost_usd=round(total_cost, 6),
             tokens=tokens,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_calls=calls,
             by_feature=[
-                UsageByFeature(feature=f, cost=round(c, 6), calls=n) for f, c, n in by_feature
+                UsageByFeature(feature=f, cost_usd=round(c, 6), calls=n) for f, c, n in by_feature
             ],
-            by_day=[UsageByDay(day=d, cost=round(c, 6)) for d, c in by_day],
+            by_day=[UsageByDay(date=d, cost_usd=round(c, 6)) for d, c in by_day],
         )
 
     async def audit(
@@ -83,8 +96,10 @@ class AdminService:
         rows, total = await self.repo.list_audit(
             params.offset, params.limit, action=action, actor=actor
         )
+        actor_ids = [a.actor_id for a in rows if a.actor_id]
+        identities = await self.repo.actor_identities(actor_ids)
         return Page[AuditLogRead](
-            items=[self._audit(a) for a in rows],
+            items=[self._audit(a, identities) for a in rows],
             total=total,
             page=params.page,
             page_size=params.page_size,
@@ -104,28 +119,36 @@ class AdminService:
         )
 
     @staticmethod
-    def _user(u: User) -> AdminUserRead:
+    def _user(u: User, org_name: str | None = None) -> AdminUserRead:
         return AdminUserRead(
             id=str(u.id),
             email=u.email,
             full_name=u.full_name,
             roles=list(u.roles or []),
-            is_active=u.is_active,
-            is_verified=u.is_verified,
-            last_login_at=u.last_login_at,
+            org_name=org_name,
+            status="active" if u.is_active else "inactive",
+            last_active_at=u.last_login_at,
             created_at=u.created_at,
         )
 
     @staticmethod
-    def _audit(a: AuditLog) -> AuditLogRead:
+    def _audit(
+        a: AuditLog, identities: dict[uuid.UUID, tuple[str, str]] | None = None
+    ) -> AuditLogRead:
+        identities = identities or {}
+        name = email = None
+        if a.actor_id and a.actor_id in identities:
+            name, email = identities[a.actor_id]
         return AuditLogRead(
             id=str(a.id),
-            actor_id=str(a.actor_id) if a.actor_id else None,
-            org_id=str(a.org_id) if a.org_id else None,
             action=a.action,
+            actor_id=str(a.actor_id) if a.actor_id else None,
+            actor_name=name,
+            actor_email=email,
+            org_id=str(a.org_id) if a.org_id else None,
             resource_type=a.resource_type,
             resource_id=a.resource_id,
             ip=a.ip,
             detail=a.detail or {},
-            created_at=a.created_at,
+            at=a.created_at,
         )

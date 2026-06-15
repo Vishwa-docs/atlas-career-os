@@ -2,30 +2,37 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.schemas import ORMModel
+from app.domains.ai.schemas import GlassBox
 from app.domains.signals.models import SIGNAL_TYPES
 
 _STATUSES = ("open", "acknowledged", "actioned", "dismissed")
 
 
-class SignalRead(ORMModel):
-    """A signal with its supporting evidence."""
+class SignalEvidence(BaseModel):
+    """One supporting evidence row rendered under a signal."""
 
-    id: uuid.UUID
-    subject_candidate_id: uuid.UUID
-    org_id: uuid.UUID | None = None
+    label: str
+    detail: str | None = None
+
+
+class SignalRead(BaseModel):
+    """A signal with a human title, severity, structured evidence, and a Glass Box."""
+
+    id: str
     type: str
-    strength: float
+    subject_candidate_id: str
+    subject_name: str | None = None
+    title: str
     summary: str | None = None
-    evidence: dict[str, Any] = Field(default_factory=dict)
+    severity: str | None = None  # low | medium | high
     status: str
-    created_at: datetime
+    evidence: list[SignalEvidence] = Field(default_factory=list)
+    glass_box: GlassBox
+    detected_at: datetime | None = None
 
 
 class SignalStatusUpdate(BaseModel):

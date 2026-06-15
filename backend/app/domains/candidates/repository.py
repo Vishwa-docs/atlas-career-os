@@ -7,6 +7,7 @@ and transaction boundaries; this layer only reads/writes rows.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select
@@ -14,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.candidates.models import CandidateProfile, CandidateSkill, CareerEvent
 from app.domains.consent.models import ConsentGrant
-from app.domains.taxonomy.models import Skill
+from app.domains.jobs.models import Job
+from app.domains.organizations.models import Organization
+from app.domains.taxonomy.models import Occupation, OccupationSkill, Skill
 
 
 def _slugify(name: str) -> str:
@@ -122,6 +125,37 @@ class CandidateRepository:
             CandidateSkill.candidate_id == candidate_id
         )
         return int((await self.session.execute(stmt)).scalar_one() or 0)
+
+    # --------------------------- dashboard reads -------------------------- #
+    async def top_jobs_by_embedding(
+        self, embedding: Sequence[float], limit: int = 3
+    ) -> list[tuple[Job, str | None]]:
+        """Cheap pgvector ranking of open jobs nearest the candidate embedding.
+
+        Returns ``(job, org_name)`` pairs, closest cosine distance first. No LLM.
+        """
+        stmt = (
+            select(Job, Organization.name)
+            .join(Organization, Organization.id == Job.org_id, isouter=True)
+            .where(Job.status == "open", Job.embedding.is_not(None))
+            .order_by(Job.embedding.cosine_distance(embedding))
+            .limit(limit)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(row[0], row[1]) for row in rows]
+
+    async def get_occupation(self, occupation_id: uuid.UUID) -> Occupation | None:
+        stmt = select(Occupation).where(Occupation.id == occupation_id)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def occupation_skill_demand(self, occupation_id: uuid.UUID) -> list[float]:
+        """Demand-trend values for the occupation's skills (drives the outlook)."""
+        stmt = (
+            select(Skill.demand_trend)
+            .join(OccupationSkill, OccupationSkill.skill_id == Skill.id)
+            .where(OccupationSkill.occupation_id == occupation_id)
+        )
+        return [float(v) for (v,) in (await self.session.execute(stmt)).all() if v is not None]
 
     # ------------------------------ consent ------------------------------- #
     async def active_grant(
