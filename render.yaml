@@ -41,5 +41,5 @@ services:
         value: "false"
       - key: CORS_ORIGINS
         sync: false # your Vercel URL, e.g. https://frontend-bay-two-7untyz4smg.vercel.app
-    # Schema is idempotent; the DB is already seeded, so seed --if-empty is a no-op.
-    preDeployCommand: "python -m app.scripts.init_db && python -m app.scripts.seed --if-empty"
+    # No preDeployCommand: free tier doesn't support it, and the Neon DB is already
+    # provisioned (schema + seed). The container just starts the API (Dockerfile CMD).

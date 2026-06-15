@@ -22,5 +22,6 @@ COPY . .
 
 EXPOSE 8000
 
-# Default: serve the API. Override `command` for the worker.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default: serve the API. Bind to $PORT when the host provides one (Render,
+# Cloud Run, etc.); default to 8000 locally (docker-compose maps 8000:8000).
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
