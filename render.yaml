@@ -1,9 +1,16 @@
-# Render blueprint for the Atlas backend (API + ARQ worker + Redis).
-# The Postgres lives on Neon (set DATABASE_URL). Frontend is on Vercel.
+# Render blueprint — a SINGLE free web service.
+#
+# Postgres lives on Neon (set DATABASE_URL). We intentionally do NOT provision
+# Render Redis or a worker: Render's Key-Value (Redis) is paid-only, and the API
+# needs neither — WebSocket notifications use an in-process manager, and the
+# background jobs (digests / re-embedding) are non-essential for the hosted demo.
+# This keeps the deploy on Render's free tier (no payment method required).
+# Frontend is on Vercel.
 services:
   - type: web
     name: atlas-api
     runtime: docker
+    plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /health
@@ -11,7 +18,7 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: DATABASE_URL
-        sync: false # set to your Neon connection string (postgresql+asyncpg://...)
+        sync: false # Neon async URL: postgresql+asyncpg://USER:PASS@HOST/neondb (no query string)
       - key: DB_REQUIRE_SSL
         value: "true"
       - key: SECRET_KEY
@@ -28,41 +35,11 @@ services:
         value: text-embedding-3-large
       - key: AZURE_OPENAI_API_VERSION
         value: "2024-12-01-preview"
-      # Embeddings stay on the deterministic embedder (matches the seeded corpus;
-      # the demo Azure resource has no embeddings deployment).
+      # Embeddings stay deterministic (match the seeded corpus; demo Azure resource
+      # has no embeddings deployment).
       - key: USE_AZURE_EMBEDDINGS
         value: "false"
-      - key: REDIS_URL
-        fromService:
-          name: atlas-redis
-          type: redis
-          property: connectionString
       - key: CORS_ORIGINS
-        sync: false # set to your Vercel URL, e.g. https://frontend-bay-two-7untyz4smg.vercel.app
-    # Create schema + seed demo data on first deploy (seed is idempotent).
+        sync: false # your Vercel URL, e.g. https://frontend-bay-two-7untyz4smg.vercel.app
+    # Schema is idempotent; the DB is already seeded, so seed --if-empty is a no-op.
     preDeployCommand: "python -m app.scripts.init_db && python -m app.scripts.seed --if-empty"
-
-  - type: worker
-    name: atlas-worker
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    dockerCommand: arq app.workers.arq_settings.WorkerSettings
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: DB_REQUIRE_SSL
-        value: "true"
-      # Worker only does deterministic re-embedding — no Azure key needed.
-      - key: USE_MOCK_LLM
-        value: "true"
-      - key: REDIS_URL
-        fromService:
-          name: atlas-redis
-          type: redis
-          property: connectionString
-
-  - type: redis
-    name: atlas-redis
-    ipAllowList: []
-    plan: free
