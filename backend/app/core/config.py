@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     # When false (or creds absent) the platform uses the deterministic MockLLMClient.
     use_mock_llm: bool = True
+    # In live mode, keep embeddings on the deterministic embedder unless the Azure
+    # resource has an embeddings deployment AND the corpus was embedded with it.
+    # (The seed embeds with the deterministic embedder, so query vectors must match.)
+    use_azure_embeddings: bool = False
 
     # --- CORS ---
     # NoDecode: let our validator split a comma-separated string itself, instead

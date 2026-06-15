@@ -1,7 +1,9 @@
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LogOut, Moon, Sun } from "lucide-react";
+import { HelpCircle, LogOut, Moon, Sun } from "lucide-react";
 import { AtlasWordmark } from "@/components/logo";
+import { GuidedTour } from "@/components/guided-tour";
+import { TOUR_STEPS } from "./tourSteps";
 import { Spinner } from "@/components/common";
 import {
   Avatar,
@@ -30,6 +32,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggle } = useTheme();
+  const [tourOpen, setTourOpen] = useState(false);
   useNotificationsRealtime();
 
   if (!user) return null;
@@ -97,6 +100,15 @@ export function AppShell() {
             Welcome back, <span className="font-medium text-foreground">{user.full_name.split(" ")[0]}</span>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTourOpen(true)}
+              className="gap-1.5"
+            >
+              <HelpCircle className="h-4 w-4" />
+              <span className="hidden sm:inline">Take a tour</span>
+            </Button>
             <NotificationBell />
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -144,6 +156,12 @@ export function AppShell() {
           </div>
         </main>
       </div>
+
+      <GuidedTour
+        steps={TOUR_STEPS[workspace]}
+        open={tourOpen}
+        onClose={() => setTourOpen(false)}
+      />
     </div>
   );
 }

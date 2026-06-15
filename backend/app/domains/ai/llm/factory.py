@@ -22,8 +22,16 @@ def _build_client() -> LLMClient:
     if settings.use_live_llm:
         from app.domains.ai.llm.azure import AzureOpenAIClient
 
-        log.info("llm.client.selected", provider="azure_openai")
-        return AzureOpenAIClient()
+        azure = AzureOpenAIClient()
+        if settings.use_azure_embeddings:
+            log.info("llm.client.selected", provider="azure_openai")
+            return azure
+        # Real Azure for generative calls, deterministic embedder for vectors so
+        # query embeddings match the seeded corpus.
+        from app.domains.ai.llm.composite import CompositeLLMClient
+
+        log.info("llm.client.selected", provider="azure_openai+mock_embeddings")
+        return CompositeLLMClient(azure, MockLLMClient())
     if not settings.use_mock_llm and not settings.azure_configured:
         log.warning("llm.client.fallback_mock", reason="azure_not_configured")
     else:
