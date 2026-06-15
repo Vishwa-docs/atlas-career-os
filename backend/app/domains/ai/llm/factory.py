@@ -21,17 +21,18 @@ log = get_logger(__name__)
 def _build_client() -> LLMClient:
     if settings.use_live_llm:
         from app.domains.ai.llm.azure import AzureOpenAIClient
-
-        azure = AzureOpenAIClient()
-        if settings.use_azure_embeddings:
-            log.info("llm.client.selected", provider="azure_openai")
-            return azure
-        # Real Azure for generative calls, deterministic embedder for vectors so
-        # query embeddings match the seeded corpus.
         from app.domains.ai.llm.composite import CompositeLLMClient
+        from app.domains.ai.llm.resilient import ResilientLLMClient
 
-        log.info("llm.client.selected", provider="azure_openai+mock_embeddings")
-        return CompositeLLMClient(azure, MockLLMClient())
+        mock = MockLLMClient()
+        # Generative calls: real Azure, but fall back to the deterministic model
+        # on any Azure failure (content-filter, timeout, rate limit) so AI output
+        # is never blank. Embeddings: always deterministic, to match the seeded
+        # corpus (unless an Azure embeddings deployment is explicitly enabled).
+        generative: LLMClient = ResilientLLMClient(AzureOpenAIClient(), mock)
+        embedder: LLMClient = AzureOpenAIClient() if settings.use_azure_embeddings else mock
+        log.info("llm.client.selected", provider="azure_openai+resilient")
+        return CompositeLLMClient(generative, embedder)
     if not settings.use_mock_llm and not settings.azure_configured:
         log.warning("llm.client.fallback_mock", reason="azure_not_configured")
     else:
