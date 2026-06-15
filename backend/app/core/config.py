@@ -96,13 +96,24 @@ class Settings(BaseSettings):
         """Use the real Azure client only when explicitly enabled AND configured."""
         return not self.use_mock_llm and self.azure_configured
 
-    # Pydantic-asyncpg DSN sanity (kept permissive for SQLite-free local/test).
+    # Normalize the DB URL so a raw managed-Postgres string (e.g. Neon's
+    # `postgresql://...?sslmode=require&channel_binding=require`) works as-is:
+    # force the async driver and strip libpq-only query params that asyncpg /
+    # SQLAlchemy-asyncpg cannot accept (TLS is handled via DB_REQUIRE_SSL).
     @field_validator("database_url")
     @classmethod
     def _validate_db(cls, v: str) -> str:
-        if v and "+asyncpg" not in v and v.startswith("postgresql"):
-            # Force the async driver so the engine is always async.
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if not v:
+            return v
+        if "+asyncpg" not in v and v.startswith("postgresql"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if "?" in v:
+            from urllib.parse import parse_qsl, urlencode
+
+            base, _, query = v.partition("?")
+            incompatible = {"sslmode", "channel_binding", "options", "target_session_attrs"}
+            kept = [(k, val) for k, val in parse_qsl(query) if k.lower() not in incompatible]
+            v = base + (f"?{urlencode(kept)}" if kept else "")
         return v
 
 
